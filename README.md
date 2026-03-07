@@ -39,7 +39,7 @@ No wildcard DNS needed. Works on Shared Hosting.
 
 ## Setup on Webhoster (5 steps)
 
-1. **Upload** `multi-tenant/` contents **and** `fbo/` folder to `htdocs/` (same level)
+1. **Upload** `multi-tenant/` contents **and** `fbo/` folder to `/` (same level)
 
 2. **Create DB** then run schema:
 ```sql
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS blogs (
 
 3. **Configure** `config.php` (copy from `config.example.php`, fill in DB credentials)
 
-4. **Point** IONOS domain root to `htdocs/` — the `.htaccess` handles all routing
+4. **Point** domain root to `/` — the `.htaccess` handles all routing
 
 5. **Create first blog** by opening `https://yourdomain.tld/` and filling out the form
 
