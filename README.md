@@ -41,7 +41,7 @@ No wildcard DNS needed. Works on IONOS Shared Hosting.
 
 1. **Upload** `multi-tenant/` contents **and** `fbo/` folder to `htdocs/` (same level)
 
-2. **Create DB** in IONOS Webspace panel, then run schema:
+2. **Create DB** then run schema:
 ```sql
 CREATE TABLE IF NOT EXISTS blogs (
     id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
