@@ -35,7 +35,7 @@
 | `yourdomain.tld/blog/demo` | demo's blog |
 | `yourdomain.tld/blog/anna` | anna's blog |
 
-No wildcard DNS needed. Works on IONOS Shared Hosting.
+No wildcard DNS needed. Works on Shared Hosting.
 
 ## Setup on IONOS (5 steps)
 
