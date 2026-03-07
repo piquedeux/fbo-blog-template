@@ -37,7 +37,7 @@
 
 No wildcard DNS needed. Works on Shared Hosting.
 
-## Setup on IONOS (5 steps)
+## Setup on Webhoster (5 steps)
 
 1. **Upload** `multi-tenant/` contents **and** `fbo/` folder to `htdocs/` (same level)
 
