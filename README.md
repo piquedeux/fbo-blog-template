@@ -56,12 +56,6 @@ CREATE TABLE IF NOT EXISTS blogs (
 
 5. **Create first blog** by opening `https://yourdomain.tld/` and filling out the form
 
-## CLI provisioning (when SSH is available)
-
-```sh
-php core/provision.php demo mysecretpw
-```
-
 ## Security notes
 
 - All blog lookups go through the DB — no user input can traverse the filesystem
