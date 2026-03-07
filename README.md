@@ -3,7 +3,7 @@
 ## Architecture
 
 ```
-htdocs/  (IONOS webroot)
+/  (webroot)
   .htaccess               ← URL rewrites
   index.php               ← Front-Controller → core/bootstrap.php
   config.php              ← DB credentials (copy from config.example.php)
