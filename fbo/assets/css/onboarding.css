@@ -1,0 +1,89 @@
+.onboarding-page {
+	min-height: 100vh;
+	display: grid;
+	place-items: center;
+	padding: 28px;
+}
+
+.onboarding-wrap {
+	width: min(860px, 100%);
+	display: grid;
+	gap: 20px;
+}
+
+.onboarding-card {
+	display: grid;
+	gap: 18px;
+	border: 2px solid var(--line);
+	padding: 20px;
+	background: var(--bg);
+}
+
+.onboarding-preview {
+	padding: 16px;
+	border: 2px solid var(--line);
+}
+
+.onboarding-preview-head {
+	align-items: center;
+}
+
+.onboarding-form {
+	margin-top: 0;
+	gap: 12px;
+}
+
+.onboarding-form .hero-actions {
+	margin-top: 2px;
+}
+
+.onboarding-lead {
+	font-weight: 600;
+}
+
+.onboarding-error {
+	color: #b91c1c;
+}
+
+.onboarding-url-preview {
+	font-family: monospace;
+	word-break: break-all;
+}
+
+/* ── OTP display box ─────────────────────────────────────────────────── */
+
+.otp-display {
+	display: grid;
+	gap: 6px;
+	border: 2px solid var(--line);
+	padding: 12px;
+	background: var(--bg);
+}
+
+.otp-display-label {
+	font-size: 12px;
+	color: var(--muted);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.otp-display-code {
+	font-family: monospace;
+	font-size: 28px;
+	font-weight: 700;
+	letter-spacing: 0.18em;
+	user-select: all;
+	cursor: text;
+	color: var(--fg);
+}
+
+.otp-display-hint {
+	font-size: 12px;
+	color: var(--muted);
+}
+
+/* ── Auth error ───────────────────────────────────────────────────────── */
+
+.auth-error {
+	color: #b91c1c;
+}

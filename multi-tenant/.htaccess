@@ -1,0 +1,12 @@
+# Apache .htaccess — place this at your IONOS webroot (htdocs/)
+# Minimal-safe version for shared hosting
+
+<IfModule mod_rewrite.c>
+RewriteEngine On
+
+# /blog/<blogword>[/anything] -> index.php?blog=<blogword>
+RewriteRule ^blog/([A-Za-z0-9_-]+)(/.*)?$ index.php?blog=$1 [L,QSA]
+
+# Root -> index.php (landing/onboarding)
+RewriteRule ^$ index.php [L,QSA]
+</IfModule>

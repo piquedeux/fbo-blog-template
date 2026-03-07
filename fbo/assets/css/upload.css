@@ -1,0 +1,81 @@
+/* Upload panel and preview styles for media uploads */
+.subtitle-form {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.subtitle-form input,
+.upload-auth-input {
+    flex: 1;
+    min-width: 220px;
+    border: 2px solid var(--line);
+    background: var(--bg);
+    color: var(--fg);
+    padding: 8px 10px;
+    outline: none;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.upload-panel textarea {
+    width: 100%;
+    min-height: 88px;
+    border: 2px solid var(--line);
+    background: var(--bg);
+    color: var(--fg);
+    padding: 8px 10px;
+    outline: none;
+    border-radius: 0;
+    box-shadow: none;
+    resize: vertical;
+    font: inherit;
+}
+
+.upload-panel {
+    display: grid;
+    gap: 8px;
+    border: 2px solid var(--line);
+    padding: 10px;
+    margin-top: 4px;
+}
+
+.upload-preview {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.upload-empty {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.upload-note {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.delete-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 3;
+    padding: 3px 6px;
+    font-size: 11px;
+    line-height: 1.1;
+}
+
+.pin-btn {
+    left: 6px;
+    right: auto;
+}
+
+.pinned-badge.with-delete {
+    right: 64px;
+}
+
+.item.marked-delete {
+    opacity: 0.45;
+    outline: 2px solid #b91c1c;
+}
