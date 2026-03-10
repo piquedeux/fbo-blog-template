@@ -62,11 +62,7 @@
 }
 
 .audio-title {
-    padding: 6px 8px;
-    text-align: center;
-    font-size: 13px;
-    color: #fff;
-    background: linear-gradient(0deg, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.15));
+    display: none;
 }
 
 .audio-controls {
@@ -76,6 +72,47 @@
     padding: 8px 0 12px 0;
 }
 
+/* Reserve vertical space so inserting the native audio element doesn't shift layout */
 .audio-controls {
-    min-height: 48px;
+    min-height: 56px;
 }
+
+/* Style the shared global audio element so its box is predictable */
+audio#globalAudio {
+    width: 100%;
+    height: 36px;
+    max-height: 56px;
+    display: block;
+}
+
+
+/* grid-only indicator (centered SVG) */
+.audio-indicator {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 6;
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+}
+
+.audio-indicator svg {
+    width: 36px;
+    height: 36px;
+}
+
+/* hide native big play button on some browsers */
+video::-webkit-media-controls-start-playback-button {
+    display: none !important;
+}
+
+video::-webkit-media-controls {
+    display: none !important;
+}
+
+/* remove inserting covers into the timestamp/stamp area - keep stamp styling unchanged */
+/* (stamp thumbnail insertion disabled in JS) */

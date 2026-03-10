@@ -29,6 +29,7 @@
 
 	const imageExt = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif']);
 	const videoExt = new Set(['mp4', 'mov', 'webm', 'm4v']);
+	const audioExt = new Set(['mp3', 'wav', 'flac', 'ogg', 'm4a', 'webm']);
 
 	const clearPreview = () => {
 		preview.innerHTML = '';
@@ -54,13 +55,21 @@
 			const ext = (file.name.split('.').pop() || '').toLowerCase();
 			const url = URL.createObjectURL(file);
 
-			if (videoExt.has(ext)) {
+			const mime = (file.type || '').toLowerCase();
+
+			if (mime.startsWith('audio/') || audioExt.has(ext)) {
+				const audio = document.createElement('audio');
+				audio.src = url;
+				audio.preload = 'metadata';
+				audio.controls = true;
+				mediaWrap.appendChild(audio);
+			} else if (mime.startsWith('video/') || videoExt.has(ext)) {
 				const video = document.createElement('video');
 				video.src = url;
 				video.preload = 'metadata';
 				video.playsInline = true;
 				mediaWrap.appendChild(video);
-			} else if (imageExt.has(ext)) {
+			} else if (mime.startsWith('image/') || imageExt.has(ext)) {
 				const img = document.createElement('img');
 				img.src = url;
 				img.alt = file.name;
@@ -216,9 +225,6 @@
 				event.preventDefault();
 				return;
 			}
-			if (!window.confirm(`Delete ${selected.size} selected post(s)?`)) {
-				event.preventDefault();
-			}
 		});
 	}
 
@@ -235,4 +241,34 @@
 	}
 
 	refreshState();
+})();
+
+(() => {
+	const form = document.getElementById('deleteBlogForm');
+	const composeConfirmInput = document.getElementById('deleteBlogConfirmCompose');
+	const irreversibleConfirmInput = document.getElementById('deleteBlogConfirmIrreversible');
+	if (!form || !composeConfirmInput || !irreversibleConfirmInput) return;
+
+	form.addEventListener('submit', (event) => {
+		composeConfirmInput.value = '0';
+		irreversibleConfirmInput.value = '0';
+
+		const stepOne = window.confirm('Switch to compose mode and delete media manually first. Continue anyway?');
+		if (!stepOne) {
+			const deniedConfirm = window.confirm('You declined the compose/media cleanup warning. Continue to final danger confirmation anyway?');
+			if (!deniedConfirm) {
+				event.preventDefault();
+				return;
+			}
+		}
+
+		const stepTwo = window.confirm('Really delete blog and all data? This cannot be undone nor restored.');
+		if (!stepTwo) {
+			event.preventDefault();
+			return;
+		}
+
+		composeConfirmInput.value = '1';
+		irreversibleConfirmInput.value = '1';
+	});
 })();

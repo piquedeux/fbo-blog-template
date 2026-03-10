@@ -41,7 +41,7 @@ function mt_blog_exists_in_db(string $blogWord): bool
         $stmt = mt_db()->prepare('SELECT 1 FROM blogs WHERE blog_word = ? LIMIT 1');
         $stmt->execute([$blogWord]);
         return (bool) $stmt->fetchColumn();
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
         return false;
     }
 }
@@ -52,7 +52,18 @@ function mt_register_blog_in_db(string $blogWord): bool
         $stmt = mt_db()->prepare('INSERT INTO blogs (blog_word) VALUES (?)');
         $stmt->execute([$blogWord]);
         return true;
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function mt_delete_blog_in_db(string $blogWord): bool
+{
+    try {
+        $stmt = mt_db()->prepare('DELETE FROM blogs WHERE blog_word = ?');
+        $stmt->execute([$blogWord]);
+        return $stmt->rowCount() > 0;
+    } catch (Throwable $e) {
         return false;
     }
 }
@@ -61,7 +72,7 @@ function mt_list_blogs(): array
 {
     try {
         return mt_db()->query('SELECT id, blog_word, created_at FROM blogs ORDER BY created_at DESC')->fetchAll();
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
         return [];
     }
 }

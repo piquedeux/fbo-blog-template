@@ -1,29 +1,134 @@
+// ── FBO typewriter animations ────────────────────────────────────────────────
 (() => {
 	const body = document.body;
-	const overlay = document.getElementById('introOverlay');
-	const text = document.getElementById('introFboText');
-	if (!body.classList.contains('intro-loading') || !overlay || !text) return;
-
 	const frames = ['F', 'FB', 'FBO'];
-	let frame = 0;
-	let cycles = 0;
 
-	const timer = window.setInterval(() => {
-		text.textContent = frames[frame];
-		frame += 1;
-		if (frame >= frames.length) {
-			frame = 0;
-			cycles += 1;
-			if (cycles >= 2) {
-				window.clearInterval(timer);
-				overlay.classList.add('done');
-				window.setTimeout(() => {
-					body.classList.remove('intro-loading');
-					overlay.remove();
-				}, 180);
+	// Big full-screen overlay (page load + title click)
+	function playBig(onDone) {
+		const overlay = document.getElementById('introOverlay');
+		const text = document.getElementById('introFboText');
+		if (!overlay || !text) { if (onDone) onDone(); return; }
+		body.classList.add('intro-loading');
+		overlay.classList.remove('done');
+		text.textContent = frames[0];
+		let frame = 0;
+		let cycles = 0;
+		const timer = window.setInterval(() => {
+			text.textContent = frames[frame];
+			frame += 1;
+			if (frame >= frames.length) {
+				frame = 0;
+				cycles += 1;
+				if (cycles >= 2) {
+					window.clearInterval(timer);
+					overlay.classList.add('done');
+					// wait for full opacity transition (220ms) then act
+					window.setTimeout(() => {
+						if (onDone) {
+							// navigating away – skip DOM cleanup, just go
+							onDone();
+						} else {
+							// page-load case: restore scroll + reset overlay
+							body.classList.remove('intro-loading');
+							overlay.classList.remove('done');
+						}
+					}, 220);
+				}
 			}
+		}, 130);
+	}
+
+	// Play big intro on page load
+	if (body.classList.contains('intro-loading')) {
+		playBig();
+	}
+
+	// Title/logo click → big animation then navigate
+	const logoLink = document.getElementById('siteTitleDisplay');
+	if (logoLink) {
+		logoLink.addEventListener('click', (e) => {
+			if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.defaultPrevented) return;
+			e.preventDefault();
+			const href = logoLink.getAttribute('href') || '/';
+			playBig(() => { window.location.href = href; });
+		});
+	}
+})();
+
+// ── FBO media buffering loader ────────────────────────────────────────────────
+(() => {
+	const frames = ['F', 'FB', 'FBO'];
+
+	function attachLoader(mediaEl, wrap) {
+		const loader = document.createElement('div');
+		loader.className = 'media-fbo-indicator';
+		const text = document.createElement('div');
+		text.className = 'media-fbo-indicator-text';
+		text.textContent = 'F';
+		loader.appendChild(text);
+		wrap.appendChild(loader);
+
+		let timer = null;
+		let frame = 0;
+
+		function startTyping() {
+			if (timer !== null) return;
+			loader.classList.add('visible');
+			frame = 0;
+			text.textContent = frames[0];
+			timer = window.setInterval(() => {
+				text.textContent = frames[frame];
+				frame = (frame + 1) % frames.length;
+			}, 120);
 		}
-	}, 130);
+
+		function stopTyping() {
+			if (timer !== null) { window.clearInterval(timer); timer = null; }
+			loader.classList.remove('visible');
+		}
+
+		const tag = mediaEl.tagName.toLowerCase();
+		if (tag === 'img') {
+			if (mediaEl.complete && mediaEl.naturalWidth > 0) {
+				loader.remove();
+				return;
+			}
+			startTyping();
+			mediaEl.addEventListener('load', stopTyping, { once: true });
+			mediaEl.addEventListener('error', stopTyping, { once: true });
+			// fallback: dismiss after 6s in case load never fires (e.g. lazy off-screen)
+			window.setTimeout(() => { if (timer !== null) stopTyping(); }, 6000);
+		} else if (tag === 'video') {
+			if (mediaEl.readyState >= 1) {
+				// metadata already available – no need for loader
+				loader.remove();
+				return;
+			}
+			startTyping();
+			// loadedmetadata fires as soon as duration/dimensions are known
+			// (works with preload="metadata" unlike canplay which needs buffered data)
+			mediaEl.addEventListener('loadedmetadata', stopTyping, { once: true });
+			mediaEl.addEventListener('canplay', stopTyping, { once: true });
+			mediaEl.addEventListener('error', stopTyping, { once: true });
+			// 4s hard timeout fallback
+			window.setTimeout(() => { if (timer !== null) stopTyping(); }, 4000);
+			mediaEl.addEventListener('waiting', startTyping);
+			mediaEl.addEventListener('playing', () => {
+				if (timer !== null) { window.clearInterval(timer); timer = null; }
+				loader.classList.remove('visible');
+			});
+		}
+	}
+
+	document.querySelectorAll('.media-wrap').forEach((wrap) => {
+		const img = wrap.querySelector('img');
+		const video = wrap.querySelector('video');
+		if (img) {
+			attachLoader(img, wrap);
+		} else if (video) {
+			attachLoader(video, wrap);
+		}
+	});
 })();
 
 (() => {

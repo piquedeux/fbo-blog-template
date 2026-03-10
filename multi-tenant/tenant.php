@@ -34,7 +34,7 @@ function mt_provision_blog(string $blogWord, string $password = ''): array
     require_once __DIR__ . '/db.php';
 
     if (mt_blog_exists_in_db($blog)) {
-        return ['ok' => true, 'message' => 'Blog already exists.', 'blog' => $blog, 'already_exists' => true];
+        return ['ok' => false, 'message' => 'Blog name already exists. Choose a different one.', 'blog' => $blog, 'already_exists' => true];
     }
 
     $blogsDir = mt_blogs_dir();
@@ -44,7 +44,14 @@ function mt_provision_blog(string $blogWord, string $password = ''): array
         return ['ok' => false, 'message' => 'Failed to create blogs directory.'];
     }
 
-    if (!is_dir($blogDir) && !mkdir($blogDir, 0775, true) && !is_dir($blogDir)) {
+    if (is_dir($blogDir)) {
+        return ['ok' => false, 'message' => 'Blog name already exists. Choose a different one.', 'blog' => $blog, 'already_exists' => true];
+    }
+
+    if (!mkdir($blogDir, 0775, true)) {
+        if (is_dir($blogDir)) {
+            return ['ok' => false, 'message' => 'Blog name already exists. Choose a different one.', 'blog' => $blog, 'already_exists' => true];
+        }
         return ['ok' => false, 'message' => 'Failed to create blog directory.'];
     }
 
@@ -63,6 +70,9 @@ function mt_provision_blog(string $blogWord, string $password = ''): array
         json_encode(['password_hash' => $hash], JSON_UNESCAPED_SLASHES));
 
     if (!mt_register_blog_in_db($blog)) {
+        if (mt_blog_exists_in_db($blog)) {
+            return ['ok' => false, 'message' => 'Blog name already exists. Choose a different one.', 'blog' => $blog, 'already_exists' => true];
+        }
         return ['ok' => false, 'message' => 'DB registration failed. Check config.php and run schema.sql.'];
     }
 

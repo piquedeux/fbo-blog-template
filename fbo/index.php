@@ -1,14 +1,33 @@
 <?php
 declare(strict_types=1);
 
+if (!function_exists('str_starts_with')) {
+	function str_starts_with(string $haystack, string $needle): bool
+	{
+		if ($needle === '') {
+			return true;
+		}
+		return substr($haystack, 0, strlen($needle)) === $needle;
+	}
+}
+
+if (!function_exists('str_contains')) {
+	function str_contains(string $haystack, string $needle): bool
+	{
+		if ($needle === '') {
+			return true;
+		}
+		return strpos($haystack, $needle) !== false;
+	}
+}
+
 session_start();
 
-const ADMIN_SESSION_KEY        = 'fbo_admin_auth';
-const MAX_TEXT_POST_LENGTH     = 280;
+const MAX_TEXT_POST_LENGTH       = 280;
 const MAX_UPLOAD_FILE_SIZE_BYTES = 104857600;
-const FLASH_MESSAGE_SESSION_KEY  = 'fbo_flash_message';
-const OTP_DISPLAY_SESSION_KEY    = 'fbo_otp_once';
-const OTP_RESET_SESSION_KEY      = 'fbo_otp_reset';
+const MAX_UPLOAD_FILES_PER_REQUEST = 10;
+// Session key constants are defined at runtime below, scoped per blog word.
+// Do NOT add ADMIN_SESSION_KEY / FLASH_MESSAGE_SESSION_KEY etc. as const here.
 const MEDIA_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov', 'webm', 'm4v', 'mp3', 'wav', 'flac', 'ogg', 'm4a'];
 const BLOG_WORD_MAX_LENGTH = 24;
 
@@ -226,6 +245,103 @@ function clear_media_files(): void
 	}
 }
 
+function delete_directory_recursive(string $dir): bool
+{
+	if (!is_dir($dir)) {
+		return true;
+	}
+
+	$items = scandir($dir);
+	if (!is_array($items)) {
+		return false;
+	}
+
+	foreach ($items as $item) {
+		if ($item === '.' || $item === '..') {
+			continue;
+		}
+		$target = $dir . '/' . $item;
+		if (is_dir($target)) {
+			if (!delete_directory_recursive($target)) {
+				return false;
+			}
+			continue;
+		}
+		if (is_file($target) && !@unlink($target)) {
+			return false;
+		}
+	}
+
+	return @rmdir($dir);
+}
+
+function delete_single_tenant_blog_data(): bool
+{
+	clear_media_files();
+	$targets = [posts_path(), settings_path(), auth_path(), otp_path()];
+	foreach ($targets as $target) {
+		if (is_file($target) && !@unlink($target)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function multi_tenant_blog_word_from_request(): string
+{
+	$raw = trim((string) ($_GET['blog'] ?? ''));
+	if ($raw === '') {
+		return '';
+	}
+	$word = preg_replace('/[^A-Za-z0-9_-]/', '', $raw) ?? '';
+	return strtolower(mb_substr($word, 0, BLOG_WORD_MAX_LENGTH));
+}
+
+function delete_multi_tenant_blog_data(string $blogWord): bool
+{
+	$blogWord = trim($blogWord);
+	if ($blogWord === '' || !defined('BLOG_ROOT')) {
+		return false;
+	}
+
+	$blogRoot = rtrim((string) BLOG_ROOT, '/');
+	if ($blogRoot === '' || !is_dir($blogRoot)) {
+		return false;
+	}
+
+	$realBlogRoot = realpath($blogRoot);
+	if ($realBlogRoot === false || !str_contains($realBlogRoot, '/multi-tenant/blogs/')) {
+		return false;
+	}
+
+	$dbDeleted = false;
+	try {
+		$dbFile = dirname(__DIR__) . '/multi-tenant/core/db.php';
+		if (is_file($dbFile)) {
+			require_once $dbFile;
+			if (function_exists('mt_delete_blog_in_db')) {
+				$dbDeleted = (bool) mt_delete_blog_in_db($blogWord);
+			}
+		}
+	} catch (Throwable $throwable) {
+		return false;
+	}
+
+	if (!$dbDeleted) {
+		return false;
+	}
+
+	$cwd = getcwd();
+	if (is_string($cwd) && str_starts_with($cwd, $realBlogRoot)) {
+		$parentDir = dirname($realBlogRoot);
+		if (is_dir($parentDir)) {
+			@chdir($parentDir);
+		}
+	}
+
+	return delete_directory_recursive($realBlogRoot);
+}
+
 function save_password_hash(string $password): void
 {
 	$hash = password_hash($password, PASSWORD_BCRYPT);
@@ -281,7 +397,7 @@ function normalize_post_entry(array $item): ?array
 	$type      = trim((string) ($item['type'] ?? 'text'));
 	$pinned    = !empty($item['pinned']);
 
-	if ($id === '' || $timestamp <= 0 || !in_array($type, ['text', 'image', 'video'], true)) {
+	if ($id === '' || $timestamp <= 0 || !in_array($type, ['text', 'image', 'video', 'audio'], true)) {
 		return null;
 	}
 
@@ -435,6 +551,30 @@ function pop_otp_display(): string
 }
 
 // ── Determine OTP-reset mode before onboarding check ─────────────────────
+
+// Preserve blog= param in all internal links (multi-tenant) and
+// scope every session key to this specific blog so auth does not
+// bleed across blogs sharing the same PHP session.
+$blogQ    = '';
+$_blogSafe = '';
+$_blogRaw  = trim((string) ($_GET['blog'] ?? ''));
+if ($_blogRaw !== '') {
+	$_tmp = preg_replace('/[^A-Za-z0-9_-]/', '', $_blogRaw) ?? '';
+	$_tmp = strtolower(mb_substr($_tmp, 0, BLOG_WORD_MAX_LENGTH));
+	if ($_tmp !== '') {
+		$_blogSafe = $_tmp;
+		$blogQ     = 'blog=' . rawurlencode($_blogSafe) . '&';
+	}
+}
+// Session keys include the blog word as a suffix so each blog has its own
+// isolated auth state. Falls back to the bare key for single-tenant mode.
+$_sk = $_blogSafe !== '' ? '_' . $_blogSafe : '';
+define('ADMIN_SESSION_KEY',         'fbo_admin_auth'  . $_sk);
+define('FLASH_MESSAGE_SESSION_KEY', 'fbo_flash'       . $_sk);
+define('OTP_DISPLAY_SESSION_KEY',   'fbo_otp_once'    . $_sk);
+define('OTP_RESET_SESSION_KEY',     'fbo_otp_reset'   . $_sk);
+unset($_blogRaw, $_tmp, $_sk);
+
 $isOtpReset      = !empty($_SESSION[OTP_RESET_SESSION_KEY]);
 $onboardingError = '';
 $flashMessage    = pop_flash_message();
@@ -449,7 +589,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['generate_o
 		json_encode(['hash' => $hash, 'expires' => time() + 900], JSON_UNESCAPED_SLASHES)
 	);
 	$_SESSION[OTP_DISPLAY_SESSION_KEY] = $otp;
-	header('Location: ?edit=1');
+	header('Location: ?' . $blogQ . 'edit=1');
 	exit;
 }
 
@@ -493,7 +633,6 @@ if (onboarding_required()) {
 | |\/| |    | |(  | 
 | |  | |  _ | |_) |  _ 
 (_)  (_) (_) \____| (_)
-moritzgauss.com©
 -->
 	<!doctype html>
 	<html lang="en">
@@ -536,6 +675,8 @@ $view = isset($_GET['view']) && in_array($_GET['view'], ['grid', 'single'], true
 	: (isset($_SERVER['HTTP_USER_AGENT']) && preg_match('/Mobile|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i', $_SERVER['HTTP_USER_AGENT']) ? 'single' : 'grid');
 $editMode    = isset($_GET['edit']) && $_GET['edit'] === '1';
 $composeMode = isset($_GET['compose']) && $_GET['compose'] === '1';
+$shuffleRequested = isset($_GET['shuffle']) && (string) $_GET['shuffle'] === '1';
+$shuffleSeedParam = (int) ($_GET['shuffle_seed'] ?? 0);
 if ($composeMode) {
 	$view = 'grid';
 }
@@ -555,7 +696,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['admin_logo
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['admin_login_password'])) {
 	$inputPassword    = (string) ($_POST['admin_login_password'] ?? '');
 	$loginTarget      = (string) ($_POST['login_target'] ?? 'edit');
-	$redirectAfterLogin = ($loginTarget === 'compose') ? '?compose=1' : '?edit=1';
+	$redirectAfterLogin = ($loginTarget === 'compose') ? '?' . $blogQ . 'compose=1' : '?' . $blogQ . 'edit=1';
 	if ($passwordHash !== '' && password_verify($inputPassword, $passwordHash)) {
 		$_SESSION[ADMIN_SESSION_KEY] = true;
 		header('Location: ' . $redirectAfterLogin);
@@ -564,13 +705,42 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['admin_logi
 	$authError = 'Wrong password.';
 }
 
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['restart_onboarding']) && $adminAuthed) {
-	@unlink(settings_path());
-	@unlink(auth_path());
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['delete_blog']) && $adminAuthed) {
+	$deletePassword = (string) ($_POST['delete_blog_password'] ?? '');
+	$confirmCompose = (string) ($_POST['delete_blog_confirm_compose'] ?? '0') === '1';
+	$confirmDanger  = (string) ($_POST['delete_blog_confirm_irreversible'] ?? '0') === '1';
+
+	if (!$confirmCompose || !$confirmDanger) {
+		set_flash_message('Delete cancelled. Both confirmations are required.');
+		header('Location: ?' . $blogQ . 'edit=1');
+		exit;
+	}
+
+	if ($passwordHash === '' || !password_verify($deletePassword, $passwordHash)) {
+		set_flash_message('Delete cancelled. Wrong password.');
+		header('Location: ?' . $blogQ . 'edit=1');
+		exit;
+	}
+
+	$deleted = false;
+	$blogWord = multi_tenant_blog_word_from_request();
+	if ($blogWord !== '' && defined('BLOG_ROOT')) {
+		$deleted = delete_multi_tenant_blog_data($blogWord);
+	} else {
+		$deleted = delete_single_tenant_blog_data();
+	}
+
+	if (!$deleted) {
+		set_flash_message('Delete failed. Please try again.');
+		header('Location: ?' . $blogQ . 'edit=1');
+		exit;
+	}
+
 	unset($_SESSION[FLASH_MESSAGE_SESSION_KEY]);
 	unset($_SESSION[ADMIN_SESSION_KEY]);
+	unset($_SESSION[OTP_RESET_SESSION_KEY]);
 	session_regenerate_id(true);
-	header('Location: ' . blog_self_url());
+	header('Location: /');
 	exit;
 }
 
@@ -580,7 +750,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_setti
 		'hero_subtitle' => (string) ($_POST['hero_subtitle'] ?? $heroSubtitle),
 	]);
 	set_flash_message('Settings saved.');
-	header('Location: ?edit=1');
+	header('Location: ?' . $blogQ . 'edit=1');
 	exit;
 }
 
@@ -588,7 +758,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['create_tex
 	$text = mb_substr(trim((string) ($_POST['text_post_content'] ?? '')), 0, MAX_TEXT_POST_LENGTH);
 	if ($text === '') {
 		set_flash_message('Post is empty.');
-		header('Location: ?compose=1');
+		header('Location: ?' . $blogQ . 'compose=1');
 		exit;
 	}
 
@@ -602,7 +772,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['create_tex
 	]);
 	save_posts($posts);
 	set_flash_message('Post created.');
-	header('Location: ?compose=1');
+	header('Location: ?' . $blogQ . 'compose=1');
 	exit;
 }
 
@@ -622,11 +792,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['upload_med
 
 	if (is_array($files) && isset($files['name'], $files['tmp_name'], $files['error']) && is_array($files['name'])) {
 		$count = count($files['name']);
+		if ($count > MAX_UPLOAD_FILES_PER_REQUEST) {
+			set_flash_message('Upload limit: max ' . MAX_UPLOAD_FILES_PER_REQUEST . ' files per upload.');
+			header('Location: ?' . $blogQ . 'compose=1');
+			exit;
+		}
 		for ($index = 0; $index < $count; $index++) {
 			$name = (string) ($files['name'][$index] ?? '');
 			$tmp  = (string) ($files['tmp_name'][$index] ?? '');
 			$err  = (int) ($files['error'][$index] ?? UPLOAD_ERR_NO_FILE);
 			$size = (int) ($files['size'][$index] ?? 0);
+			$reportedMime = strtolower(trim((string) ($files['type'][$index] ?? '')));
 
 			if ($err !== UPLOAD_ERR_OK || $name === '' || $tmp === '') {
 				$failed++;
@@ -654,7 +830,27 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['upload_med
 
 			@touch($targetPath, $clientUploadTimestamp, $clientUploadTimestamp);
 
-			$type       = in_array($extension, ['mp4', 'mov', 'webm', 'm4v'], true) ? 'video' : 'image';
+			$detectedMime = '';
+			if (function_exists('finfo_open')) {
+				$finfo = finfo_open(FILEINFO_MIME_TYPE);
+				if ($finfo !== false) {
+					$mime = finfo_file($finfo, $targetPath);
+					if (is_string($mime)) {
+						$detectedMime = strtolower(trim($mime));
+					}
+					finfo_close($finfo);
+				}
+			}
+			$effectiveMime = $detectedMime !== '' ? $detectedMime : $reportedMime;
+
+			$type = 'image';
+			if (in_array($extension, ['mp4', 'mov', 'm4v'], true)) {
+				$type = 'video';
+			} elseif ($extension === 'webm') {
+				$type = str_starts_with($effectiveMime, 'audio/') ? 'audio' : 'video';
+			} elseif (in_array($extension, ['mp3', 'wav', 'flac', 'ogg', 'm4a'], true)) {
+				$type = 'audio';
+			}
 			$newPosts[] = [
 				'id'        => 'media_' . $clientUploadTimestamp . '_' . bin2hex(random_bytes(3)),
 				'type'      => $type,
@@ -673,10 +869,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['upload_med
 
 	$message = 'Uploaded: ' . $saved;
 	if ($failed > 0) {
-		$message .= ' | Failed: ' . $failed . ' (limit: 100MB per file)';
+		$message .= ' | Failed: ' . $failed . ' (limit: ' . ((int) (MAX_UPLOAD_FILE_SIZE_BYTES / 1048576)) . 'MB per file)';
 	}
 	set_flash_message($message);
-	header('Location: ?compose=1');
+	header('Location: ?' . $blogQ . 'compose=1');
 	exit;
 }
 
@@ -706,7 +902,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && (isset($_POST['delete_pa
 		}
 
 		$postType = (string) ($post['type'] ?? 'text');
-		if (in_array($postType, ['image', 'video'], true)) {
+		if (in_array($postType, ['image', 'video', 'audio'], true)) {
 			$target = resolve_local_media_path_for_delete((string) ($post['path'] ?? ''));
 			if ($target === null || !@unlink($target)) {
 				$failed++;
@@ -727,11 +923,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && (isset($_POST['delete_pa
 	set_flash_message($message);
 
 	if ($closeAfterSave) {
-		header('Location: ?view=' . rawurlencode($view) . '&page=' . rawurlencode((string) $page));
+		header('Location: ?' . $blogQ . 'view=' . rawurlencode($view) . '&page=' . rawurlencode((string) $page));
 		exit;
 	}
 
-	header('Location: ?compose=1&view=' . rawurlencode($view) . '&page=' . rawurlencode((string) $page));
+	header('Location: ?' . $blogQ . 'compose=1&view=' . rawurlencode($view) . '&page=' . rawurlencode((string) $page));
 	exit;
 }
 
@@ -743,7 +939,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['delete_pos
 		if ((string) ($post['id'] ?? '') !== $postId) {
 			continue;
 		}
-		if (in_array((string) ($post['type'] ?? ''), ['image', 'video'], true)) {
+		if (in_array((string) ($post['type'] ?? ''), ['image', 'video', 'audio'], true)) {
 			$deleteMediaPath = (string) ($post['path'] ?? '');
 		}
 		break;
@@ -757,7 +953,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['delete_pos
 		}
 	}
 	set_flash_message('Post deleted.');
-	header('Location: ?compose=1');
+	header('Location: ?' . $blogQ . 'compose=1');
 	exit;
 }
 
@@ -778,7 +974,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['pin_post']
 		save_posts($posts);
 		set_flash_message('Post pinned.');
 	}
-	header('Location: ?compose=1');
+	header('Location: ?' . $blogQ . 'compose=1');
 	exit;
 }
 
@@ -799,11 +995,90 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['unpin_post
 		save_posts($posts);
 		set_flash_message('Post unpinned.');
 	}
-	header('Location: ?compose=1');
+	header('Location: ?' . $blogQ . 'compose=1');
+	exit;
+}
+
+// ── Backup download ─────────────────────────────────────────────────────
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['download_backup']) && $adminAuthed) {
+	if (!class_exists('ZipArchive')) {
+		http_response_code(500);
+		header('Content-Type: text/plain; charset=utf-8');
+		echo 'ZipArchive is not available on this server.';
+		exit;
+	}
+
+	$_backupDir   = backend_dir_path();
+	$_mediaDir    = media_dir_path();
+	$_blogLabel   = preg_replace('/[^A-Za-z0-9_-]/', '', $siteName);
+	$_tmpFile     = tempnam(sys_get_temp_dir(), 'fbo_backup_');
+	if ($_tmpFile === false) {
+		http_response_code(500);
+		header('Content-Type: text/plain; charset=utf-8');
+		echo 'Could not create temporary file.';
+		exit;
+	}
+
+	$_zip = new ZipArchive();
+	if ($_zip->open($_tmpFile, ZipArchive::OVERWRITE) !== true) {
+		@unlink($_tmpFile);
+		http_response_code(500);
+		header('Content-Type: text/plain; charset=utf-8');
+		echo 'Could not create ZIP archive.';
+		exit;
+	}
+
+	// Backend files
+	foreach ([
+		'posts.json'    => $_backupDir . '/posts.json',
+		'settings.json' => $_backupDir . '/settings.json',
+		'.auth.json'    => $_backupDir . '/.auth.json',
+	] as $_zipName => $_filePath) {
+		if (is_file($_filePath)) {
+			$_zip->addFile($_filePath, $_zipName);
+		}
+	}
+
+	// Media folder
+	if (is_dir($_mediaDir)) {
+		$_realMedia = realpath($_mediaDir);
+		if ($_realMedia !== false) {
+			$_iter = new RecursiveIteratorIterator(
+				new RecursiveDirectoryIterator($_realMedia, FilesystemIterator::SKIP_DOTS)
+			);
+			foreach ($_iter as $_fileInfo) {
+				if (!$_fileInfo->isFile()) {
+					continue;
+				}
+				$_realFile = $_fileInfo->getRealPath();
+				if ($_realFile === false) {
+					continue;
+				}
+				// Path traversal guard
+				if (strncmp($_realFile, $_realMedia . DIRECTORY_SEPARATOR, strlen($_realMedia) + 1) !== 0) {
+					continue;
+				}
+				$_relPath = 'media/' . substr($_realFile, strlen($_realMedia) + 1);
+				$_zip->addFile($_realFile, $_relPath);
+			}
+		}
+	}
+
+	$_zip->close();
+
+	$_filename = 'fbo-blog-' . ($_blogLabel !== '' ? $_blogLabel . '-' : '') . date('Y-m-d') . '.zip';
+	header('Content-Type: application/zip');
+	header('Content-Disposition: attachment; filename="' . $_filename . '"');
+	header('Content-Length: ' . (string) filesize($_tmpFile));
+	header('Cache-Control: no-store, no-cache, must-revalidate');
+	header('Pragma: no-cache');
+	readfile($_tmpFile);
+	@unlink($_tmpFile);
 	exit;
 }
 
 $posts          = load_posts();
+$allPostsCount  = count($posts);
 $singlePostMode = false;
 if ($requestedPostId !== '' && !$composeMode) {
 	foreach ($posts as $post) {
@@ -818,6 +1093,57 @@ if ($requestedPostId !== '' && !$composeMode) {
 		break;
 	}
 }
+
+$shuffleThreshold = 100;
+$shuffleRemaining = max(0, $shuffleThreshold - $allPostsCount);
+$shuffleEligible  = !$composeMode && !$singlePostMode && $allPostsCount >= $shuffleThreshold;
+$shuffleSeed      = $shuffleSeedParam > 0 ? $shuffleSeedParam : random_int(100000, 999999999);
+$shuffleActive    = $shuffleEligible && $shuffleRequested;
+
+if ($shuffleActive) {
+	$pinnedPosts = [];
+	$unpinnedPosts = [];
+	foreach ($posts as $post) {
+		if (!empty($post['pinned'])) {
+			$pinnedPosts[] = $post;
+			continue;
+		}
+		$unpinnedPosts[] = $post;
+	}
+
+	usort($unpinnedPosts, static function (array $a, array $b) use ($shuffleSeed): int {
+		$idA = (string) ($a['id'] ?? '');
+		$idB = (string) ($b['id'] ?? '');
+		$hashA = hash('sha256', $shuffleSeed . '|' . $idA);
+		$hashB = hash('sha256', $shuffleSeed . '|' . $idB);
+		$cmp = $hashA <=> $hashB;
+		if ($cmp !== 0) {
+			return $cmp;
+		}
+		return $idA <=> $idB;
+	});
+
+	$posts = array_merge($pinnedPosts, $unpinnedPosts);
+}
+
+$stateQuery = '';
+if ($editMode) {
+	$stateQuery .= '&edit=1';
+}
+if ($composeMode) {
+	$stateQuery .= '&compose=1';
+}
+
+$shuffleQuery = '';
+if ($shuffleActive) {
+	$shuffleQuery = '&shuffle=1&shuffle_seed=' . rawurlencode((string) $shuffleSeed);
+}
+
+$shuffleToggleQuery = $stateQuery;
+if (!$shuffleActive && $shuffleEligible) {
+	$shuffleToggleQuery .= '&shuffle=1&shuffle_seed=' . rawurlencode((string) $shuffleSeed);
+}
+
 $perPage      = $view === 'grid' ? 180 : 60;
 $totalItems   = count($posts);
 $totalPages   = max(1, (int) ceil($totalItems / max(1, $perPage)));
@@ -855,8 +1181,14 @@ moritzgauss.com©
 	<nav class="topbar<?= $composeMode ? ' topbar-compose' : '' ?>">
 		<div class="topbar-left">
 			<?php if (!$composeMode): ?>
-				   <a href="?view=grid" class="ui-btn <?= $view === 'grid' ? 'active' : '' ?>" id="gridViewBtn">grid</a>
-				   <a href="?view=single" class="ui-btn <?= $view === 'single' ? 'active' : '' ?>" id="listViewBtn">list</a>
+				   <?php if ($singlePostMode): ?>
+					   <a class="ui-btn" href="?<?= $blogQ ?>view=grid&page=<?= $fromPage ?><?= $stateQuery ?><?= $shuffleQuery ?>">back to grid</a>
+				   <?php endif; ?>
+				   <a href="?<?= $blogQ ?>view=grid<?= $stateQuery ?><?= $shuffleQuery ?>" class="ui-btn <?= $view === 'grid' ? 'active' : '' ?>" id="gridViewBtn">grid</a>
+				   <a href="?<?= $blogQ ?>view=single<?= $stateQuery ?><?= $shuffleQuery ?>" class="ui-btn <?= $view === 'single' ? 'active' : '' ?>" id="listViewBtn">list</a>
+				   <?php if ($shuffleEligible): ?>
+					   <a href="?<?= $blogQ ?>view=<?= rawurlencode($view) ?>&page=1<?= $shuffleToggleQuery ?>" class="ui-btn <?= $shuffleActive ? 'active' : '' ?>" id="shuffleModeBtn">shuffle</a>
+				   <?php endif; ?>
 			<?php endif; ?>
 			<button type="button" class="ui-btn" id="themeToggle">dark mode</button>
 		</div>
@@ -869,17 +1201,13 @@ moritzgauss.com©
 					<?php endfor; ?>
 				</select>
 			</div>
-		<?php else: ?>
-			<div class="topbar-right">
-				<button type="button" class="ui-btn" id="saveCloseUploadBtn" data-close-url="?view=<?= $view ?>&page=<?= $page ?>">Save &amp; close</button>
-			</div>
 		<?php endif; ?>
 	</nav>
 
 	<?php if (!$postsOnPage): ?>
 		<main class="archive <?= $view ?>">
 			<article class="item">
-				<div class="text-post-body">No posts yet. Use compose mode to create your first text post.</div>
+				<div class="text-post-body">No posts yet. Use compose mode to create your first post.</div>
 				<div class="stamp">Placeholder content</div>
 			</article>
 		</main>
@@ -887,7 +1215,9 @@ moritzgauss.com©
 		<main class="archive <?= $view ?><?= $singlePostMode ? ' single-post-mode' : '' ?>">
 			<?php foreach ($postsOnPage as $post): ?>
 				<?php $isPinned = !empty($post['pinned']); ?>
-				<article class="item<?= $isPinned ? ' is-pinned' : '' ?>" data-post-id="<?= htmlspecialchars((string) $post['id'], ENT_QUOTES, 'UTF-8') ?>">
+				<?php $postType = (string) ($post['type'] ?? 'text'); ?>
+				<?php $postMediaPath = in_array($postType, ['image', 'video', 'audio'], true) ? asset_url((string) ($post['path'] ?? '')) : ''; ?>
+				<article class="item<?= $isPinned ? ' is-pinned' : '' ?>" data-post-id="<?= htmlspecialchars((string) $post['id'], ENT_QUOTES, 'UTF-8') ?>" data-post-type="<?= htmlspecialchars($postType, ENT_QUOTES, 'UTF-8') ?>" data-media-path="<?= htmlspecialchars($postMediaPath, ENT_QUOTES, 'UTF-8') ?>">
 					<?php if ($adminAuthed && $composeMode): ?>
 						<form method="post" class="pin-form">
 							<input type="hidden" name="post_id" value="<?= htmlspecialchars((string) $post['id'], ENT_QUOTES, 'UTF-8') ?>">
@@ -901,12 +1231,18 @@ moritzgauss.com©
 						<?php $mediaUrl = htmlspecialchars(asset_url((string) ($post['path'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>
 						<div class="media-wrap">
 							<?php if ((string) ($post['type'] ?? '') === 'video'): ?>
-								<video src="<?= $mediaUrl ?>" preload="metadata" controls playsinline></video>
 								<?php if ($view === 'grid'): ?>
-									<div class="grid-video-overlay" aria-hidden="true">
-										<svg class="grid-play-icon" width="36px" height="36px" stroke-width="1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" color="#ffffff"><path d="M6.90588 4.53682C6.50592 4.2998 6 4.58808 6 5.05299V18.947C6 19.4119 6.50592 19.7002 6.90588 19.4632L18.629 12.5162C19.0211 12.2838 19.0211 11.7162 18.629 11.4838L6.90588 4.53682Z" stroke="#ffffff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+									<div class="grid-video-placeholder" aria-hidden="true">
+										<svg class="grid-play-icon" width="36px" height="36px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.90588 4.53682C6.50592 4.2998 6 4.58808 6 5.05299V18.947C6 19.4119 6.50592 19.7002 6.90588 19.4632L18.629 12.5162C19.0211 12.2838 19.0211 11.7162 18.629 11.4838L6.90588 4.53682Z" stroke="#ffffff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+									</div>
+								<?php else: ?>
+									<video src="<?= $mediaUrl ?>" preload="metadata" playsinline></video>
+									<div class="list-video-overlay" aria-label="Play video">
+										<svg class="list-play-icon" width="36px" height="36px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.90588 4.53682C6.50592 4.2998 6 4.58808 6 5.05299V18.947C6 19.4119 6.50592 19.7002 6.90588 19.4632L18.629 12.5162C19.0211 12.2838 19.0211 11.7162 18.629 11.4838L6.90588 4.53682Z" stroke="#ffffff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 									</div>
 								<?php endif; ?>
+							<?php elseif ((string) ($post['type'] ?? '') === 'audio'): ?>
+								<div class="grid-audio-placeholder" aria-hidden="true"></div>
 							<?php else: ?>
 								<img src="<?= $mediaUrl ?>" alt="Uploaded media" loading="lazy">
 							<?php endif; ?>
@@ -921,15 +1257,22 @@ moritzgauss.com©
 		</main>
 	<?php endif; ?>
 
+	<?php if (!$composeMode && !$singlePostMode): ?>
+		<div class="shuffle-hint-row">
+			<?php if ($shuffleEligible): ?>
+				<span class="meta">Shuffle mode is available<?= $shuffleActive ? ' (active).' : '.' ?></span>
+			<?php else: ?>
+				<span class="meta">Shuffle mode unlocks in <?= $shuffleRemaining ?> more post<?= $shuffleRemaining === 1 ? '' : 's' ?>.</span>
+			<?php endif; ?>
+		</div>
+	<?php endif; ?>
+
 	<nav class="topbar topbar-pagination">
-		<?php if ($singlePostMode): ?>
-			<a class="ui-btn" href="?view=grid&page=<?= $fromPage ?>">back to grid</a>
-		<?php endif; ?>
 		<?php if ($page > 1): ?>
-			<a class="ui-btn" href="?view=<?= $view ?>&page=<?= $page - 1 ?><?= $editMode ? '&edit=1' : '' ?><?= $composeMode ? '&compose=1' : '' ?>">newer</a>
+			<a class="ui-btn" href="?<?= $blogQ ?>view=<?= $view ?>&page=<?= $page - 1 ?><?= $stateQuery ?><?= $shuffleQuery ?>">newer</a>
 		<?php endif; ?>
 		<?php if ($page < $totalPages): ?>
-			<a class="ui-btn" href="?view=<?= $view ?>&page=<?= $page + 1 ?><?= $editMode ? '&edit=1' : '' ?><?= $composeMode ? '&compose=1' : '' ?>">older</a>
+			<a class="ui-btn" href="?<?= $blogQ ?>view=<?= $view ?>&page=<?= $page + 1 ?><?= $stateQuery ?><?= $shuffleQuery ?>">older</a>
 		<?php endif; ?>
 	</nav>
 

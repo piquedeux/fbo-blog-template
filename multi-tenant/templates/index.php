@@ -52,7 +52,6 @@ $previewUrl  = $scheme . '://' . $host . '/blog/' . rawurlencode($previewWord);
 | |\/| |    | |(  | 
 | |  | |  _ | |_) |  _ 
 (_)  (_) (_) \____| (_)
-moritzgauss.com©
 -->
 <!doctype html>
 <html lang="en">
@@ -179,6 +178,13 @@ moritzgauss.com©
 							<span class="upload-note">&mdash; <?= $safeDate ?></span>
 						</div>
 					<?php endforeach; ?>
+					<div class="subtitle-line ob-blog-item"
+						data-word="moritz"
+						data-url="/blog/moritz"
+						data-fullurl="https://blog.piquedeux.de">
+						<a href="https://blog.piquedeux.de" target="_blank" rel="noopener noreferrer" class="text-link">/blog/moritz</a>
+						<span class="upload-note">&mdash; 01.01.2026 00:00:00</span>
+					</div>
 				</div>
 
 				<p class="ob-no-results" id="obNoResults">No blogs match your search.</p>

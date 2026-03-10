@@ -6,10 +6,21 @@
 	</form>
 	<div class="subtitle-line">Title preview: <span id="editTitlePreview"><?= htmlspecialchars(strtoupper($siteName), ENT_QUOTES, 'UTF-8') ?></span></div>
 	<div class="subtitle-line">Path preview: <span id="editUrlPreview"><?= htmlspecialchars(blog_path_preview_url($siteName), ENT_QUOTES, 'UTF-8') ?></span></div>
-	<form method="post" class="subtitle-form" id="restartOnboardingForm">
-		<button type="submit" name="restart_onboarding" value="1" class="ui-btn danger-btn" data-confirm="Restart onboarding and require a new admin password?">Start onboarding fresh</button>
+	<div class="hero-actions">
+		<a href="?<?= $blogQ ?>download_backup=1" class="ui-btn">Download your whole blog! All imaes and data as a .zip file.</a>
+	</div>
+
+	<form method="post" class="upload-panel" id="deleteBlogForm">
+		<input type="hidden" name="delete_blog" value="1">
+		<input type="hidden" name="delete_blog_confirm_compose" id="deleteBlogConfirmCompose" value="0">
+		<input type="hidden" name="delete_blog_confirm_irreversible" id="deleteBlogConfirmIrreversible" value="0">
+		<div class="subtitle-line danger-note">Danger zone: permanently delete this blog, all media files, and all backend data.</div>
+		<input type="password" class="upload-auth-input" name="delete_blog_password" maxlength="120" placeholder="Type your current admin password" autocomplete="off" required>
+		<div class="hero-actions">
+			<button type="submit" class="ui-btn danger-btn">Delete blog permanently</button>
+		</div>
 	</form>
-	<div class="subtitle-line danger-note">This resets onboarding and admin login only. Your posts and uploaded media stay untouched.</div>
+	<div class="subtitle-line danger-note">This cannot be undone and cannot be restored.</div>
 	<?php if ($flashMessage !== ''): ?>
 		<div class="subtitle-line"><?= htmlspecialchars($flashMessage, ENT_QUOTES, 'UTF-8') ?></div>
 	<?php endif; ?>
@@ -26,7 +37,7 @@
 		</div>
 		<div id="inlineUploadPreview" class="upload-preview"></div>
 		<div id="inlineUploadEmpty" class="upload-empty">No files selected yet.</div>
-		<div class="upload-note">Files are previewed as post cards before upload.</div>
+		<div class="upload-note">Files are previewed as post cards before upload (max <?= MAX_UPLOAD_FILES_PER_REQUEST ?> files, <?= (int) (MAX_UPLOAD_FILE_SIZE_BYTES / 1048576) ?>MB each).</div>
 	</form>
 
 	<form method="post" class="upload-panel" id="textPostForm">
@@ -39,7 +50,7 @@
 	</form>
 
 	<div class="hero-actions">
-		<button type="button" class="ui-btn ui-btn-strong" id="saveCloseUploadBtn" data-close-url="?view=<?= $view ?>&page=<?= $page ?>">Save &amp; close</button>
+		<button type="button" class="ui-btn ui-btn-strong" id="saveCloseUploadBtn" data-close-url="?<?= $blogQ ?>view=<?= $view ?>&page=<?= $page ?>">Save &amp; close</button>
 	</div>
 	<form method="post" class="upload-panel pending-delete-actions" id="pendingDeleteForm">
 		<input type="hidden" name="delete_page_media" value="1">
@@ -76,7 +87,7 @@
 		<form method="post" class="subtitle-form">
 			<input type="password" class="upload-auth-input" name="otp_password" maxlength="32" placeholder="Enter one-time password" autocomplete="off" required>
 			<button type="submit" name="otp_login" value="1" class="ui-btn ui-btn-strong">Continue</button>
-			<a href="?edit=1" class="ui-btn">Back</a>
+			<a href="?<?= $blogQ ?>edit=1" class="ui-btn">Back</a>
 		</form>
 	<?php else: ?>
 		<form method="post" class="subtitle-form">
