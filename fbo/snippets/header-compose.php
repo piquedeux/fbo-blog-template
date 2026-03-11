@@ -4,7 +4,8 @@
 	<?php endif; ?>
 
 	<form method="post" enctype="multipart/form-data" class="upload-panel" id="inlineUploadForm">
-		<input type="file" id="inlineUploadFiles" class="upload-auth-input" name="files[]" accept="image/*,video/*,audio/*" multiple required>
+		<input type="file" id="inlineUploadFiles" class="upload-auth-input" name="files[]" accept="image/*,video/*,audio/*"
+			multiple required>
 		<input type="hidden" id="uploadClientEpoch" name="upload_client_epoch" value="">
 		<div class="hero-actions">
 			<button type="submit" name="upload_media" value="1" class="ui-btn ui-btn-strong">Upload media</button>
@@ -12,11 +13,13 @@
 		</div>
 		<div id="inlineUploadPreview" class="upload-preview"></div>
 		<div id="inlineUploadEmpty" class="upload-empty">No files selected yet.</div>
-		<div class="upload-note">Files are previewed as post cards before upload (max <?= MAX_UPLOAD_FILES_PER_REQUEST ?> files, <?= (int) (MAX_UPLOAD_FILE_SIZE_BYTES / 1048576) ?>MB each).</div>
+		<div class="upload-note">Files are previewed as post cards before upload (max <?= MAX_UPLOAD_FILES_PER_REQUEST ?>
+			files, <?= (int) (MAX_UPLOAD_FILE_SIZE_BYTES / 1048576) ?>MB each).</div>
 	</form>
 
 	<form method="post" class="upload-panel" id="textPostForm">
-		<textarea id="textPostContent" name="text_post_content" maxlength="<?= MAX_TEXT_POST_LENGTH ?>" placeholder="Write a text post (max <?= MAX_TEXT_POST_LENGTH ?> chars)" required></textarea>
+		<textarea id="textPostContent" name="text_post_content" maxlength="<?= MAX_TEXT_POST_LENGTH ?>"
+			placeholder="Write a text post (max <?= MAX_TEXT_POST_LENGTH ?> chars)" required></textarea>
 		<input type="hidden" id="textPostClientEpoch" name="text_post_client_epoch" value="">
 		<div class="hero-actions">
 			<button type="submit" name="create_text_post" value="1" class="ui-btn ui-btn-strong">Publish post</button>
@@ -36,29 +39,25 @@
 	</form>
 
 	<div class="hero-actions">
-		<button type="button" class="ui-btn ui-btn-strong" id="saveCloseUploadBtn" data-close-url="?<?= $blogQ ?>view=<?= $view ?>&page=<?= $page ?>">Save &amp; close</button>
+		<button type="button" class="ui-btn ui-btn-strong" id="saveCloseUploadBtn"
+			data-close-url="?<?= $blogQ ?>view=<?= $view ?>&page=<?= $page ?>">Save &amp; close</button>
 	</div>
 <?php else: ?>
+	<?php if ($flashMessage !== ''): ?>
+		<div class="subtitle-line"><?= htmlspecialchars($flashMessage, ENT_QUOTES, 'UTF-8') ?></div>
+	<?php endif; ?>
 	<?php if ($authError !== ''): ?>
 		<div class="subtitle-line auth-error"><?= htmlspecialchars($authError, ENT_QUOTES, 'UTF-8') ?></div>
 	<?php endif; ?>
 
-	<?php if ($otpDisplay !== ''): ?>
-		<div class="otp-display">
-			<div class="otp-display-label">Your one-time password (valid 15 min):</div>
-			<div class="otp-display-code" id="otpCode"><?= htmlspecialchars($otpDisplay, ENT_QUOTES, 'UTF-8') ?></div>
-			<div class="otp-display-hint">Copy this code — it will not be shown again.</div>
-		</div>
-	<?php endif; ?>
-
-	<?php $showOtpForm = isset($otpLoginError) || $otpDisplay !== ''; ?>
+	<?php $showOtpForm = isset($otpLoginError) || (isset($_GET['otp']) && $_GET['otp'] === '1'); ?>
 
 	<?php if ($showOtpForm): ?>
 		<?php if (!empty($otpLoginError)): ?>
 			<div class="subtitle-line auth-error"><?= htmlspecialchars($otpLoginError, ENT_QUOTES, 'UTF-8') ?></div>
 		<?php endif; ?>
 		<form method="post" class="subtitle-form">
-			<input type="password" class="upload-auth-input" name="otp_password" maxlength="32" placeholder="Enter one-time password" autocomplete="off" required>
+		<input type="password" class="upload-auth-input" name="otp_password" maxlength="32" placeholder="Enter one-time password from email" autocomplete="off" required>
 			<button type="submit" name="otp_login" value="1" class="ui-btn ui-btn-strong">Continue</button>
 			<a href="?<?= $blogQ ?>compose=1" class="ui-btn">Back</a>
 		</form>
@@ -66,7 +65,8 @@
 		<div class="subtitle-line">Enter admin password once to unlock compose and edit.</div>
 		<form method="post" class="subtitle-form">
 			<input type="hidden" name="login_target" value="compose">
-			<input type="password" class="upload-auth-input" name="admin_login_password" maxlength="120" placeholder="Password" required>
+			<input type="password" class="upload-auth-input" name="admin_login_password" maxlength="120" placeholder="Password"
+				required>
 			<button type="submit" class="ui-btn ui-btn-strong">Unlock compose + edit</button>
 		</form>
 		<form method="post" class="subtitle-form">

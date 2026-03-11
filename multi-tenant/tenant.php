@@ -38,10 +38,19 @@ function mt_provision_blog(string $blogWord, string $password = ''): array
     }
 
     $blogsDir = mt_blogs_dir();
+    // Validate blogs directory is in expected location
+    $realBlogsDir = realpath(dirname(__DIR__) . '/multi-tenant/blogs') ?: $blogsDir;
+    
     $blogDir  = $blogsDir . '/' . $blog;
 
     if (!is_dir($blogsDir) && !mkdir($blogsDir, 0775, true) && !is_dir($blogsDir)) {
         return ['ok' => false, 'message' => 'Failed to create blogs directory.'];
+    }
+
+    // Verify blogs directory hasn't been changed
+    $verifyBlogsDir = realpath($blogsDir);
+    if ($verifyBlogsDir === false || $verifyBlogsDir !== $realBlogsDir) {
+        return ['ok' => false, 'message' => 'Failed to verify blogs directory.'];
     }
 
     if (is_dir($blogDir)) {
@@ -53,6 +62,12 @@ function mt_provision_blog(string $blogWord, string $password = ''): array
             return ['ok' => false, 'message' => 'Blog name already exists. Choose a different one.', 'blog' => $blog, 'already_exists' => true];
         }
         return ['ok' => false, 'message' => 'Failed to create blog directory.'];
+    }
+
+    // Verify the blog directory is in the correct location
+    $verifyBlogDir = realpath($blogDir);
+    if ($verifyBlogDir === false || !str_starts_with($verifyBlogDir, $realBlogsDir . DIRECTORY_SEPARATOR)) {
+        return ['ok' => false, 'message' => 'Failed to verify blog directory.'];
     }
 
     $backendDir = $blogDir . '/backend';

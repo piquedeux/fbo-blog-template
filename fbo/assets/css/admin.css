@@ -76,6 +76,10 @@
 	color: #b91c1c;
 }
 
+.notice-warn {
+	color: #b45309;
+}
+
 .delete-btn {
 	position: absolute;
 	top: 6px;

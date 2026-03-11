@@ -1,4 +1,3 @@
-// ── Live onboarding preview ───────────────────────────────────────────────
 (() => {
 	const titleInput = document.getElementById('onboardingBlogWord');
 	const titlePreview = document.getElementById('onboardingTitlePreview');
@@ -27,7 +26,6 @@
 	updatePreview();
 })();
 
-// ── Confirm dialogs via data-confirm attribute ────────────────────────────
 (() => {
 	document.addEventListener('submit', (event) => {
 		const form = event.target;
@@ -40,7 +38,6 @@
 	});
 })();
 
-// ── SVG icon thumbnails → PNG ─────────────────────────────────────────────
 (() => {
 	const svgNodes = Array.from(document.querySelectorAll('.icon-thumb svg'));
 	if (!svgNodes.length) return;
@@ -70,9 +67,74 @@
 			};
 			image.src = svgData;
 		} catch {
-			// silently ignore
 		}
 	};
 
 	svgNodes.forEach(toPng);
+})();
+
+(() => {
+	const pageSize = 20;
+	const search = document.getElementById('obSearch');
+	const list = document.getElementById('obBlogList');
+	const noResults = document.getElementById('obNoResults');
+	const count = document.getElementById('obCount');
+	const loadMoreWrap = document.getElementById('obLoadMoreWrap');
+	const loadMoreButton = document.getElementById('obLoadMore');
+
+	if (!list) {
+		return;
+	}
+
+	const items = Array.from(list.querySelectorAll('.ob-blog-item'));
+	let visibleLimit = pageSize;
+
+	const getMatches = (query) => items.filter((item) => {
+		const word = (item.dataset.word || '').toLowerCase();
+		const url = (item.dataset.url || '').toLowerCase();
+		const fullUrl = (item.dataset.fullurl || '').toLowerCase();
+		return query === '' || word.includes(query) || url.includes(query) || fullUrl.includes(query);
+	});
+
+	const applyState = () => {
+		const query = search ? search.value.toLowerCase().trim() : '';
+		const matches = getMatches(query);
+
+		items.forEach((item) => {
+			const matchIndex = matches.indexOf(item);
+			const isVisible = matchIndex !== -1 && (query !== '' || matchIndex < visibleLimit);
+			item.hidden = !isVisible;
+		});
+
+		if (noResults) {
+			noResults.style.display = query !== '' && matches.length === 0 ? '' : 'none';
+		}
+
+		if (loadMoreWrap) {
+			loadMoreWrap.style.display = query === '' && matches.length > visibleLimit ? '' : 'none';
+		}
+
+		if (count) {
+			const visibleCount = query === '' ? Math.min(matches.length, visibleLimit) : matches.length;
+			count.textContent = query !== ''
+				? `(${visibleCount} of ${items.length})`
+				: `(${items.length})`;
+		}
+	};
+
+	if (search) {
+		search.addEventListener('input', () => {
+			visibleLimit = pageSize;
+			applyState();
+		});
+	}
+
+	if (loadMoreButton) {
+		loadMoreButton.addEventListener('click', () => {
+			visibleLimit += pageSize;
+			applyState();
+		});
+	}
+
+	applyState();
 })();

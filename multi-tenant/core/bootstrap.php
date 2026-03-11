@@ -123,6 +123,21 @@ if (!defined('MEDIA_WEB_ROOT')) {
     define('MEDIA_WEB_ROOT', '/multi-tenant/blogs/' . $blogWord . '/media');
 }
 
+// ── SMTP constants (loaded from config.php, never per-blog settings) ───────
+$_mtCfgPath = dirname(__DIR__) . '/config.php';
+if (is_file($_mtCfgPath)) {
+    $_mtCfg = require $_mtCfgPath;
+    if (is_array($_mtCfg)) {
+        if (!defined('FBO_SMTP_HOST')) define('FBO_SMTP_HOST', (string) ($_mtCfg['smtp_host'] ?? ''));
+        if (!defined('FBO_SMTP_PORT')) define('FBO_SMTP_PORT', (int)    ($_mtCfg['smtp_port'] ?? 587));
+        if (!defined('FBO_SMTP_USER')) define('FBO_SMTP_USER', (string) ($_mtCfg['smtp_user'] ?? ''));
+        if (!defined('FBO_SMTP_PASS')) define('FBO_SMTP_PASS', (string) ($_mtCfg['smtp_pass'] ?? ''));
+        if (!defined('FBO_SMTP_FROM')) define('FBO_SMTP_FROM', (string) ($_mtCfg['smtp_from'] ?? ''));
+    }
+    unset($_mtCfg);
+}
+unset($_mtCfgPath);
+
 chdir($realTarget);
 try {
     require $fboIndex;

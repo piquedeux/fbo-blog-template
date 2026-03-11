@@ -23,9 +23,6 @@ multi-tenant/blogs/*/
 fbo/media/*
 !fbo/media/.gitkeep
 
-# Nested info/demo directory should not be tracked
-fbo/fbo/
-
 # ── Runtime JSON data (standalone fbo instance) ───────────────
 # posts.json and settings.json in the root fbo/ are demo data;
 # the actual template copies live inside each tenant blog dir.

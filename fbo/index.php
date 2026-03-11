@@ -23,11 +23,9 @@ if (!function_exists('str_contains')) {
 
 session_start();
 
-const MAX_TEXT_POST_LENGTH       = 280;
+const MAX_TEXT_POST_LENGTH = 280;
 const MAX_UPLOAD_FILE_SIZE_BYTES = 104857600;
 const MAX_UPLOAD_FILES_PER_REQUEST = 10;
-// Session key constants are defined at runtime below, scoped per blog word.
-// Do NOT add ADMIN_SESSION_KEY / FLASH_MESSAGE_SESSION_KEY etc. as const here.
 const MEDIA_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov', 'webm', 'm4v', 'mp3', 'wav', 'flac', 'ogg', 'm4a'];
 const BLOG_WORD_MAX_LENGTH = 24;
 
@@ -49,7 +47,10 @@ function backend_dir_path(): string
 {
 	$path = blog_root() . '/backend';
 	if (!is_dir($path)) {
-		mkdir($path, 0775, true);
+		$realBase = realpath(blog_root());
+		if ($realBase !== false) {
+			mkdir($path, 0775, true);
+		}
 	}
 	return $path;
 }
@@ -78,7 +79,10 @@ function media_dir_path(): string
 {
 	$path = blog_root() . '/media';
 	if (!is_dir($path)) {
-		mkdir($path, 0775, true);
+		$realBase = realpath(blog_root());
+		if ($realBase !== false) {
+			mkdir($path, 0775, true);
+		}
 	}
 	return $path;
 }
@@ -115,15 +119,16 @@ function local_asset_url(string $relativePath): string
 
 	if (defined('ASSET_BASE_URL') && is_string(ASSET_BASE_URL) && ASSET_BASE_URL !== '') {
 		$fullPath = __DIR__ . '/' . $cleanPath;
-		$version  = is_file($fullPath) ? (string) filemtime($fullPath) : '1';
+		$version = is_file($fullPath) ? (string) filemtime($fullPath) : '1';
 		return htmlspecialchars(
 			rtrim((string) ASSET_BASE_URL, '/') . '/' . $cleanPath . '?v=' . rawurlencode($version),
-			ENT_QUOTES, 'UTF-8'
+			ENT_QUOTES,
+			'UTF-8'
 		);
 	}
 
 	$fullPath = blog_root() . '/' . $cleanPath;
-	$version  = is_file($fullPath) ? (string) filemtime($fullPath) : '1';
+	$version = is_file($fullPath) ? (string) filemtime($fullPath) : '1';
 	return htmlspecialchars($cleanPath . '?v=' . rawurlencode($version), ENT_QUOTES, 'UTF-8');
 }
 
@@ -153,8 +158,7 @@ function request_scheme(): string
 function blog_self_url(): string
 {
 	$scheme = request_scheme();
-	$host   = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
-	// In multi-tenant mode the blog word arrives via $_GET['blog']
+	$host = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
 	$raw = trim((string) ($_GET['blog'] ?? ''));
 	if ($raw !== '') {
 		$word = preg_replace('/[^A-Za-z0-9_-]/', '', $raw) ?? '';
@@ -163,8 +167,7 @@ function blog_self_url(): string
 			return $scheme . '://' . $host . '/blog/' . rawurlencode($word);
 		}
 	}
-	// Fallback: strip query string from current URI
-	$uri  = (string) ($_SERVER['REQUEST_URI'] ?? '/');
+	$uri = (string) ($_SERVER['REQUEST_URI'] ?? '/');
 	$path = (string) (parse_url($uri, PHP_URL_PATH) ?? '/');
 	return $scheme . '://' . $host . $path;
 }
@@ -173,8 +176,8 @@ function blog_self_url(): string
 function blog_path_preview_url(string $blogWord): string
 {
 	$scheme = request_scheme();
-	$host   = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
-	$word   = normalize_blog_word($blogWord);
+	$host = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
+	$word = normalize_blog_word($blogWord);
 	return $scheme . '://' . $host . '/blog/' . rawurlencode(strtolower($word));
 }
 
@@ -183,6 +186,7 @@ function load_settings(): array
 	$default = [
 		'site_name'    => 'fbo',
 		'hero_subtitle' => '',
+		'admin_email'  => '',
 	];
 
 	$path = settings_path();
@@ -197,21 +201,118 @@ function load_settings(): array
 
 	$siteName = normalize_blog_word((string) ($decoded['site_name'] ?? $default['site_name']));
 	$subtitle = trim((string) ($decoded['hero_subtitle'] ?? $default['hero_subtitle']));
+	$email    = trim((string) ($decoded['admin_email'] ?? ''));
+	if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+		$email = '';
+	}
 
 	return [
 		'site_name'    => $siteName,
 		'hero_subtitle' => mb_substr($subtitle, 0, 180),
+		'admin_email'  => $email,
 	];
 }
 
 function save_settings(array $settings): void
 {
+	$email = trim((string) ($settings['admin_email'] ?? ''));
+	if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+		$email = '';
+	}
 	$payload = [
 		'site_name'    => normalize_blog_word((string) ($settings['site_name'] ?? 'fbo')),
 		'hero_subtitle' => mb_substr(trim((string) ($settings['hero_subtitle'] ?? '')), 0, 180),
+		'admin_email'  => mb_substr($email, 0, 254),
 	];
 
 	file_put_contents(settings_path(), json_encode($payload, JSON_UNESCAPED_SLASHES));
+}
+
+function send_fbo_mail(string $to, string $subject, string $body): bool
+{
+	$host = defined('FBO_SMTP_HOST') ? (string) FBO_SMTP_HOST : '';
+	$port = defined('FBO_SMTP_PORT') ? (int)    FBO_SMTP_PORT : 587;
+	$user = defined('FBO_SMTP_USER') ? (string) FBO_SMTP_USER : '';
+	$pass = defined('FBO_SMTP_PASS') ? (string) FBO_SMTP_PASS : '';
+	$from = defined('FBO_SMTP_FROM') ? (string) FBO_SMTP_FROM : $user;
+	if ($from === '') {
+		$from = $user;
+	}
+
+	if ($host === '' || $user === '') {
+		$fallbackHost = preg_replace('/[^a-zA-Z0-9.\-]/', '', (string) ($_SERVER['HTTP_HOST'] ?? 'localhost'));
+		return (bool) @mail($to, $subject, $body, 'From: noreply@' . $fallbackHost);
+	}
+
+	$useSSL = ($port === 465);
+	$conn   = @fsockopen(($useSSL ? 'ssl://' : '') . $host, $port, $errno, $errstr, 15);
+	if (!$conn) {
+		return false;
+	}
+
+	$read = static function () use ($conn): string {
+		$buf = '';
+		while (!feof($conn)) {
+			$line = fgets($conn, 512);
+			if ($line === false) {
+				break;
+			}
+			$buf .= $line;
+			if (strlen($line) >= 4 && $line[3] === ' ') {
+				break;
+			}
+		}
+		return $buf;
+	};
+
+	$write = static function (string $cmd) use ($conn): void {
+		fwrite($conn, $cmd . "\r\n");
+	};
+
+	$read();
+	$write('EHLO ' . (gethostname() ?: 'localhost'));
+	$ehlo = $read();
+
+	if (!$useSSL && str_contains($ehlo, 'STARTTLS')) {
+		$write('STARTTLS');
+		$read();
+		stream_socket_enable_crypto($conn, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+		$write('EHLO ' . (gethostname() ?: 'localhost'));
+		$read();
+	}
+
+	$write('AUTH LOGIN');
+	$read();
+	$write(base64_encode($user));
+	$read();
+	$write(base64_encode($pass));
+	$authResp = $read();
+
+	if (!str_starts_with(ltrim($authResp), '235')) {
+		fclose($conn);
+		return false;
+	}
+
+	$write('MAIL FROM:<' . $from . '>');
+	$read();
+	$write('RCPT TO:<' . $to . '>');
+	$read();
+	$write('DATA');
+	$read();
+
+	$msg  = 'From: ' . $from . "\r\n";
+	$msg .= 'To: ' . $to . "\r\n";
+	$msg .= 'Subject: ' . $subject . "\r\n";
+	$msg .= 'MIME-Version: 1.0' . "\r\n";
+	$msg .= 'Content-Type: text/plain; charset=UTF-8' . "\r\n\r\n";
+	$msg .= $body . "\r\n.";
+	$write($msg);
+	$dataResp = $read();
+
+	$write('QUIT');
+	fclose($conn);
+
+	return str_starts_with(ltrim($dataResp), '250');
 }
 
 function onboarding_required(): bool
@@ -225,11 +326,12 @@ function onboarding_required(): bool
 function clear_media_files(): void
 {
 	$mediaPath = blog_root() . '/media';
-	if (!is_dir($mediaPath)) {
+	$realMedia = safe_realpath_within($mediaPath, blog_root());
+	if ($realMedia === false || !is_dir($realMedia)) {
 		return;
 	}
 
-	$files = scandir($mediaPath);
+	$files = scandir($realMedia);
 	if (!is_array($files)) {
 		return;
 	}
@@ -238,7 +340,10 @@ function clear_media_files(): void
 		if ($file === '.' || $file === '..') {
 			continue;
 		}
-		$target = $mediaPath . '/' . $file;
+		$target = $realMedia . DIRECTORY_SEPARATOR . $file;
+		if (!str_starts_with($target, $realMedia . DIRECTORY_SEPARATOR)) {
+			continue;
+		}
 		if (is_file($target)) {
 			@unlink($target);
 		}
@@ -247,11 +352,12 @@ function clear_media_files(): void
 
 function delete_directory_recursive(string $dir): bool
 {
-	if (!is_dir($dir)) {
+	$realDir = realpath($dir);
+	if ($realDir === false || !is_dir($realDir)) {
 		return true;
 	}
 
-	$items = scandir($dir);
+	$items = scandir($realDir);
 	if (!is_array($items)) {
 		return false;
 	}
@@ -260,7 +366,11 @@ function delete_directory_recursive(string $dir): bool
 		if ($item === '.' || $item === '..') {
 			continue;
 		}
-		$target = $dir . '/' . $item;
+		$target = $realDir . DIRECTORY_SEPARATOR . $item;
+		if (!str_starts_with($target, $realDir . DIRECTORY_SEPARATOR)) {
+			continue;
+		}
+
 		if (is_dir($target)) {
 			if (!delete_directory_recursive($target)) {
 				return false;
@@ -272,7 +382,7 @@ function delete_directory_recursive(string $dir): bool
 		}
 	}
 
-	return @rmdir($dir);
+	return @rmdir($realDir);
 }
 
 function delete_single_tenant_blog_data(): bool
@@ -310,7 +420,18 @@ function delete_multi_tenant_blog_data(string $blogWord): bool
 	}
 
 	$realBlogRoot = realpath($blogRoot);
-	if ($realBlogRoot === false || !str_contains($realBlogRoot, '/multi-tenant/blogs/')) {
+	if ($realBlogRoot === false) {
+		return false;
+	}
+
+	if (!str_contains($realBlogRoot, '/multi-tenant/blogs/')) {
+		return false;
+	}
+
+	$expectedBlogRoot = dirname(__DIR__) . '/multi-tenant/blogs/' . $blogWord;
+	$realExpected = realpath($expectedBlogRoot);
+
+	if ($realExpected === false || $realBlogRoot !== $realExpected) {
 		return false;
 	}
 
@@ -392,10 +513,10 @@ function load_otp(): ?array
 
 function normalize_post_entry(array $item): ?array
 {
-	$id        = trim((string) ($item['id'] ?? ''));
+	$id = trim((string) ($item['id'] ?? ''));
 	$timestamp = (int) ($item['timestamp'] ?? 0);
-	$type      = trim((string) ($item['type'] ?? 'text'));
-	$pinned    = !empty($item['pinned']);
+	$type = trim((string) ($item['type'] ?? 'text'));
+	$pinned = !empty($item['pinned']);
 
 	if ($id === '' || $timestamp <= 0 || !in_array($type, ['text', 'image', 'video', 'audio'], true)) {
 		return null;
@@ -408,10 +529,10 @@ function normalize_post_entry(array $item): ?array
 		}
 
 		return [
-			'id'        => $id,
-			'type'      => 'text',
-			'text'      => mb_substr($text, 0, MAX_TEXT_POST_LENGTH),
-			'pinned'    => $pinned,
+			'id' => $id,
+			'type' => 'text',
+			'text' => mb_substr($text, 0, MAX_TEXT_POST_LENGTH),
+			'pinned' => $pinned,
 			'timestamp' => $timestamp,
 		];
 	}
@@ -422,12 +543,28 @@ function normalize_post_entry(array $item): ?array
 	}
 
 	return [
-		'id'        => $id,
-		'type'      => $type,
-		'path'      => $path,
-		'pinned'    => $pinned,
+		'id' => $id,
+		'type' => $type,
+		'path' => $path,
+		'pinned' => $pinned,
 		'timestamp' => $timestamp,
 	];
+}
+
+function safe_realpath_within(string $path, string $basePath): ?string
+{
+	$realPath = realpath($path);
+	$realBase = realpath($basePath);
+
+	if ($realPath === false || $realBase === false) {
+		return null;
+	}
+
+	if (!str_starts_with($realPath, $realBase . DIRECTORY_SEPARATOR) && $realPath !== $realBase) {
+		return null;
+	}
+
+	return $realPath;
 }
 
 function resolve_local_media_path_for_delete(string $relativePath): ?string
@@ -437,19 +574,12 @@ function resolve_local_media_path_for_delete(string $relativePath): ?string
 		return null;
 	}
 
-	$target    = blog_root() . '/' . ltrim($relativePath, '/');
-	$mediaRoot = realpath(blog_root() . '/media');
-	$realTarget = realpath($target);
+	$target = blog_root() . '/' . ltrim($relativePath, '/');
+	$mediaRoot = blog_root() . '/media';
 
-	if ($mediaRoot === false || $realTarget === false) {
-		return null;
-	}
+	$realTarget = safe_realpath_within($target, $mediaRoot);
 
-	if (!str_starts_with($realTarget, $mediaRoot . DIRECTORY_SEPARATOR)) {
-		return null;
-	}
-
-	if (!is_file($realTarget)) {
+	if ($realTarget === null || !is_file($realTarget)) {
 		return null;
 	}
 
@@ -468,7 +598,7 @@ function load_posts(): array
 		return [];
 	}
 
-	$items  = isset($decoded['items']) && is_array($decoded['items']) ? $decoded['items'] : (array_is_list($decoded) ? $decoded : []);
+	$items = isset($decoded['items']) && is_array($decoded['items']) ? $decoded['items'] : (array_is_list($decoded) ? $decoded : []);
 	$result = [];
 	foreach ($items as $item) {
 		if (!is_array($item)) {
@@ -499,7 +629,7 @@ function save_posts(array $posts): void
 function linkify_text_post_content(string $text): string
 {
 	$escaped = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
-	$linked  = preg_replace_callback(
+	$linked = preg_replace_callback(
 		'~((?:https?://|www\.)[^\s<]+)~iu',
 		static function (array $matches): string {
 			$display = (string) ($matches[1] ?? '');
@@ -508,7 +638,7 @@ function linkify_text_post_content(string $text): string
 			}
 
 			$trimmedDisplay = rtrim($display, '.,!?;:)]}');
-			$suffix         = substr($display, strlen($trimmedDisplay));
+			$suffix = substr($display, strlen($trimmedDisplay));
 			if ($trimmedDisplay === '') {
 				return $display;
 			}
@@ -543,60 +673,51 @@ function pop_flash_message(): string
 	return $message;
 }
 
-function pop_otp_display(): string
-{
-	$otp = (string) ($_SESSION[OTP_DISPLAY_SESSION_KEY] ?? '');
-	unset($_SESSION[OTP_DISPLAY_SESSION_KEY]);
-	return $otp;
-}
-
-// ── Determine OTP-reset mode before onboarding check ─────────────────────
-
-// Preserve blog= param in all internal links (multi-tenant) and
-// scope every session key to this specific blog so auth does not
-// bleed across blogs sharing the same PHP session.
-$blogQ    = '';
+$blogQ = '';
 $_blogSafe = '';
-$_blogRaw  = trim((string) ($_GET['blog'] ?? ''));
+$_blogRaw = trim((string) ($_GET['blog'] ?? ''));
 if ($_blogRaw !== '') {
 	$_tmp = preg_replace('/[^A-Za-z0-9_-]/', '', $_blogRaw) ?? '';
 	$_tmp = strtolower(mb_substr($_tmp, 0, BLOG_WORD_MAX_LENGTH));
 	if ($_tmp !== '') {
 		$_blogSafe = $_tmp;
-		$blogQ     = 'blog=' . rawurlencode($_blogSafe) . '&';
+		$blogQ = 'blog=' . rawurlencode($_blogSafe) . '&';
 	}
 }
-// Session keys include the blog word as a suffix so each blog has its own
-// isolated auth state. Falls back to the bare key for single-tenant mode.
 $_sk = $_blogSafe !== '' ? '_' . $_blogSafe : '';
-define('ADMIN_SESSION_KEY',         'fbo_admin_auth'  . $_sk);
-define('FLASH_MESSAGE_SESSION_KEY', 'fbo_flash'       . $_sk);
-define('OTP_DISPLAY_SESSION_KEY',   'fbo_otp_once'    . $_sk);
-define('OTP_RESET_SESSION_KEY',     'fbo_otp_reset'   . $_sk);
+define('ADMIN_SESSION_KEY', 'fbo_admin_auth' . $_sk);
+define('FLASH_MESSAGE_SESSION_KEY', 'fbo_flash' . $_sk);
+define('OTP_RESET_SESSION_KEY', 'fbo_otp_reset' . $_sk);
 unset($_blogRaw, $_tmp, $_sk);
 
-$isOtpReset      = !empty($_SESSION[OTP_RESET_SESSION_KEY]);
+$isOtpReset = !empty($_SESSION[OTP_RESET_SESSION_KEY]);
 $onboardingError = '';
-$flashMessage    = pop_flash_message();
-$otpDisplay      = pop_otp_display();
+$flashMessage = pop_flash_message();
 
-// ── OTP generation ────────────────────────────────────────────────────────
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['generate_otp'])) {
-	$otp  = strtoupper(bin2hex(random_bytes(4))); // 8 hex chars
+	$resetEmail = trim((string) (load_settings()['admin_email'] ?? ''));
+	if ($resetEmail === '' || !filter_var($resetEmail, FILTER_VALIDATE_EMAIL)) {
+		set_flash_message('No admin email configured. Add one in Edit → Settings to enable password reset.');
+		header('Location: ?' . $blogQ . 'edit=1');
+		exit;
+	}
+	$otp  = strtoupper(bin2hex(random_bytes(4)));
 	$hash = password_hash($otp, PASSWORD_BCRYPT);
 	file_put_contents(
 		otp_path(),
 		json_encode(['hash' => $hash, 'expires' => time() + 900], JSON_UNESCAPED_SLASHES)
 	);
-	$_SESSION[OTP_DISPLAY_SESSION_KEY] = $otp;
-	header('Location: ?' . $blogQ . 'edit=1');
+	$mailSubject = 'FBO — one-time password';
+	$mailBody    = 'One-time password (valid 15 min): ' . $otp . "\r\n\r\nDo not share this code.";
+	send_fbo_mail($resetEmail, $mailSubject, $mailBody);
+	set_flash_message('Reset code sent to your admin email.');
+	header('Location: ?' . $blogQ . 'edit=1&otp=1');
 	exit;
 }
 
-// ── OTP login ─────────────────────────────────────────────────────────────
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['otp_login'])) {
 	$inputOtp = strtoupper(trim((string) ($_POST['otp_password'] ?? '')));
-	$otpData  = load_otp();
+	$otpData = load_otp();
 	if ($otpData !== null && $inputOtp !== '' && password_verify($inputOtp, (string) ($otpData['hash'] ?? ''))) {
 		@unlink(otp_path());
 		unset($_SESSION[ADMIN_SESSION_KEY]);
@@ -625,17 +746,10 @@ if (onboarding_required()) {
 		header('Location: /');
 		exit;
 	}
-?>
-<!--
- __  __       ____  
-|  \/  |     / ___| 
-| \  / |    | | __  
-| |\/| |    | |(  | 
-| |  | |  _ | |_) |  _ 
-(_)  (_) (_) \____| (_)
--->
+	?>
 	<!doctype html>
 	<html lang="en">
+
 	<head>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
@@ -644,15 +758,18 @@ if (onboarding_required()) {
 		<link rel="stylesheet" href="<?= local_asset_url('assets/css/admin.css') ?>">
 		<link rel="stylesheet" href="<?= local_asset_url('assets/css/onboarding.css') ?>">
 	</head>
+
 	<body class="onboarding-page">
 		<main class="onboarding-wrap">
 			<section class="onboarding-card">
 				<p class="subtitle-line onboarding-lead">Set a new admin password. Posts and media stay untouched.</p>
 				<?php if ($onboardingError !== ''): ?>
-					<div class="subtitle-line onboarding-error"><?= htmlspecialchars($onboardingError, ENT_QUOTES, 'UTF-8') ?></div>
+					<div class="subtitle-line onboarding-error"><?= htmlspecialchars($onboardingError, ENT_QUOTES, 'UTF-8') ?>
+					</div>
 				<?php endif; ?>
 				<form method="post" class="upload-panel onboarding-form">
-					<input class="upload-auth-input" type="password" name="admin_password" maxlength="120" placeholder="New password (min 6 chars)" required>
+					<input class="upload-auth-input" type="password" name="admin_password" maxlength="120"
+						placeholder="New password (min 6 chars)" required>
 					<div class="hero-actions">
 						<button type="submit" name="complete_onboarding" value="1" class="ui-btn">Set new password</button>
 					</div>
@@ -660,32 +777,35 @@ if (onboarding_required()) {
 			</section>
 		</main>
 	</body>
-	</html><?php
+
+	</html>
+	<?php
 	exit;
 }
 
-$settings       = load_settings();
-$siteName       = (string) ($settings['site_name'] ?? 'fbo');
+$settings = load_settings();
+$siteName = (string) ($settings['site_name'] ?? 'fbo');
 $siteNameDisplay = strtoupper($siteName);
-$heroSubtitle   = (string) ($settings['hero_subtitle'] ?? '');
-$passwordHash   = load_password_hash();
+$heroSubtitle = (string) ($settings['hero_subtitle'] ?? '');
+$adminEmail  = (string) ($settings['admin_email'] ?? '');
+$passwordHash = load_password_hash();
 
 $view = isset($_GET['view']) && in_array($_GET['view'], ['grid', 'single'], true)
 	? $_GET['view']
 	: (isset($_SERVER['HTTP_USER_AGENT']) && preg_match('/Mobile|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i', $_SERVER['HTTP_USER_AGENT']) ? 'single' : 'grid');
-$editMode    = isset($_GET['edit']) && $_GET['edit'] === '1';
+$editMode = isset($_GET['edit']) && $_GET['edit'] === '1';
 $composeMode = isset($_GET['compose']) && $_GET['compose'] === '1';
 $shuffleRequested = isset($_GET['shuffle']) && (string) $_GET['shuffle'] === '1';
 $shuffleSeedParam = (int) ($_GET['shuffle_seed'] ?? 0);
 if ($composeMode) {
 	$view = 'grid';
 }
-$page             = max(1, (int) ($_GET['page'] ?? 1));
-$fromPage         = max(1, (int) ($_GET['from_page'] ?? $page));
-$requestedPostId  = trim((string) ($_GET['post_id'] ?? ''));
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$fromPage = max(1, (int) ($_GET['from_page'] ?? $page));
+$requestedPostId = trim((string) ($_GET['post_id'] ?? ''));
 $showIntroAnimation = (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') && empty($_GET);
-$adminAuthed      = !empty($_SESSION[ADMIN_SESSION_KEY]);
-$authError        = '';
+$adminAuthed = !empty($_SESSION[ADMIN_SESSION_KEY]);
+$authError = '';
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['admin_logout'])) {
 	unset($_SESSION[ADMIN_SESSION_KEY]);
@@ -694,8 +814,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['admin_logo
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['admin_login_password'])) {
-	$inputPassword    = (string) ($_POST['admin_login_password'] ?? '');
-	$loginTarget      = (string) ($_POST['login_target'] ?? 'edit');
+	$inputPassword = (string) ($_POST['admin_login_password'] ?? '');
+	$loginTarget = (string) ($_POST['login_target'] ?? 'edit');
 	$redirectAfterLogin = ($loginTarget === 'compose') ? '?' . $blogQ . 'compose=1' : '?' . $blogQ . 'edit=1';
 	if ($passwordHash !== '' && password_verify($inputPassword, $passwordHash)) {
 		$_SESSION[ADMIN_SESSION_KEY] = true;
@@ -708,7 +828,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['admin_logi
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['delete_blog']) && $adminAuthed) {
 	$deletePassword = (string) ($_POST['delete_blog_password'] ?? '');
 	$confirmCompose = (string) ($_POST['delete_blog_confirm_compose'] ?? '0') === '1';
-	$confirmDanger  = (string) ($_POST['delete_blog_confirm_irreversible'] ?? '0') === '1';
+	$confirmDanger = (string) ($_POST['delete_blog_confirm_irreversible'] ?? '0') === '1';
 
 	if (!$confirmCompose || !$confirmDanger) {
 		set_flash_message('Delete cancelled. Both confirmations are required.');
@@ -748,8 +868,27 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_setti
 	save_settings([
 		'site_name'    => (string) ($_POST['site_name'] ?? $siteName),
 		'hero_subtitle' => (string) ($_POST['hero_subtitle'] ?? $heroSubtitle),
+		'admin_email'  => (string) ($_POST['admin_email'] ?? $adminEmail),
 	]);
 	set_flash_message('Settings saved.');
+	header('Location: ?' . $blogQ . 'edit=1');
+	exit;
+}
+
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['change_password']) && $adminAuthed) {
+	$currentPw = (string) ($_POST['current_password'] ?? '');
+	$newPw     = (string) ($_POST['new_password'] ?? '');
+	$confirmPw = (string) ($_POST['confirm_password'] ?? '');
+	if ($passwordHash === '' || !password_verify($currentPw, $passwordHash)) {
+		set_flash_message('Current password is incorrect.');
+	} elseif (mb_strlen($newPw) < 6) {
+		set_flash_message('New password must be at least 6 characters.');
+	} elseif ($newPw !== $confirmPw) {
+		set_flash_message('Passwords do not match.');
+	} else {
+		save_password_hash($newPw);
+		set_flash_message('Password changed.');
+	}
 	header('Location: ?' . $blogQ . 'edit=1');
 	exit;
 }
@@ -764,10 +903,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['create_tex
 
 	$posts = load_posts();
 	array_unshift($posts, [
-		'id'        => 'post_' . time() . '_' . bin2hex(random_bytes(3)),
-		'type'      => 'text',
-		'text'      => $text,
-		'pinned'    => false,
+		'id' => 'post_' . time() . '_' . bin2hex(random_bytes(3)),
+		'type' => 'text',
+		'text' => $text,
+		'pinned' => false,
 		'timestamp' => time(),
 	]);
 	save_posts($posts);
@@ -777,10 +916,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['create_tex
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['upload_media']) && $adminAuthed) {
-	$files     = $_FILES['files'] ?? null;
-	$saved     = 0;
-	$failed    = 0;
-	$newPosts  = [];
+	$files = $_FILES['files'] ?? null;
+	$saved = 0;
+	$failed = 0;
+	$newPosts = [];
 	$uploadDir = media_dir_path();
 	$clientUploadTimestamp = (int) ($_POST['upload_client_epoch'] ?? 0);
 	if ($clientUploadTimestamp > 1000000000000) {
@@ -799,8 +938,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['upload_med
 		}
 		for ($index = 0; $index < $count; $index++) {
 			$name = (string) ($files['name'][$index] ?? '');
-			$tmp  = (string) ($files['tmp_name'][$index] ?? '');
-			$err  = (int) ($files['error'][$index] ?? UPLOAD_ERR_NO_FILE);
+			$tmp = (string) ($files['tmp_name'][$index] ?? '');
+			$err = (int) ($files['error'][$index] ?? UPLOAD_ERR_NO_FILE);
 			$size = (int) ($files['size'][$index] ?? 0);
 			$reportedMime = strtolower(trim((string) ($files['type'][$index] ?? '')));
 
@@ -822,6 +961,19 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['upload_med
 
 			$targetName = sprintf('%s_%s.%s', date('Ymd_His'), bin2hex(random_bytes(4)), $extension);
 			$targetPath = $uploadDir . '/' . $targetName;
+
+			$validateTarget = safe_realpath_within($targetPath, $uploadDir);
+			if ($validateTarget === null) {
+				$realUploadDir = realpath($uploadDir);
+				if ($realUploadDir === false || !is_dir($realUploadDir)) {
+					$failed++;
+					continue;
+				}
+				if (!str_starts_with($realUploadDir . '/' . $targetName, $realUploadDir . '/')) {
+					$failed++;
+					continue;
+				}
+			}
 
 			if (!move_uploaded_file($tmp, $targetPath)) {
 				$failed++;
@@ -852,10 +1004,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['upload_med
 				$type = 'audio';
 			}
 			$newPosts[] = [
-				'id'        => 'media_' . $clientUploadTimestamp . '_' . bin2hex(random_bytes(3)),
-				'type'      => $type,
-				'path'      => 'media/' . $targetName,
-				'pinned'    => false,
+				'id' => 'media_' . $clientUploadTimestamp . '_' . bin2hex(random_bytes(3)),
+				'type' => $type,
+				'path' => 'media/' . $targetName,
+				'pinned' => false,
 				'timestamp' => $clientUploadTimestamp,
 			];
 			$saved++;
@@ -877,9 +1029,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['upload_med
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && (isset($_POST['delete_page_posts']) || isset($_POST['delete_page_media'])) && $adminAuthed) {
-	$ids            = $_POST['page_post_ids'] ?? [];
+	$ids = $_POST['page_post_ids'] ?? [];
 	$closeAfterSave = isset($_POST['close_after_save']) && (string) $_POST['close_after_save'] === '1';
-	$selectedIds    = [];
+	$selectedIds = [];
 	if (is_array($ids)) {
 		foreach ($ids as $id) {
 			$id = trim((string) $id);
@@ -889,9 +1041,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && (isset($_POST['delete_pa
 		}
 	}
 
-	$deleted   = 0;
-	$failed    = 0;
-	$posts     = load_posts();
+	$deleted = 0;
+	$failed = 0;
+	$posts = load_posts();
 	$nextPosts = [];
 
 	foreach ($posts as $post) {
@@ -932,8 +1084,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && (isset($_POST['delete_pa
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['delete_post']) && $adminAuthed) {
-	$postId          = trim((string) ($_POST['post_id'] ?? ''));
-	$posts           = load_posts();
+	$postId = trim((string) ($_POST['post_id'] ?? ''));
+	$posts = load_posts();
 	$deleteMediaPath = '';
 	foreach ($posts as $post) {
 		if ((string) ($post['id'] ?? '') !== $postId) {
@@ -958,15 +1110,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['delete_pos
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['pin_post']) && $adminAuthed) {
-	$postId  = trim((string) ($_POST['post_id'] ?? ''));
-	$posts   = load_posts();
+	$postId = trim((string) ($_POST['post_id'] ?? ''));
+	$posts = load_posts();
 	$updated = false;
 	foreach ($posts as &$post) {
 		if ((string) ($post['id'] ?? '') !== $postId) {
 			continue;
 		}
 		$post['pinned'] = true;
-		$updated        = true;
+		$updated = true;
 		break;
 	}
 	unset($post);
@@ -979,15 +1131,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['pin_post']
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['unpin_post']) && $adminAuthed) {
-	$postId  = trim((string) ($_POST['post_id'] ?? ''));
-	$posts   = load_posts();
+	$postId = trim((string) ($_POST['post_id'] ?? ''));
+	$posts = load_posts();
 	$updated = false;
 	foreach ($posts as &$post) {
 		if ((string) ($post['id'] ?? '') !== $postId) {
 			continue;
 		}
 		$post['pinned'] = false;
-		$updated        = true;
+		$updated = true;
 		break;
 	}
 	unset($post);
@@ -999,7 +1151,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['unpin_post
 	exit;
 }
 
-// ── Backup download ─────────────────────────────────────────────────────
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['download_backup']) && $adminAuthed) {
 	if (!class_exists('ZipArchive')) {
 		http_response_code(500);
@@ -1008,10 +1159,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['download_bac
 		exit;
 	}
 
-	$_backupDir   = backend_dir_path();
-	$_mediaDir    = media_dir_path();
-	$_blogLabel   = preg_replace('/[^A-Za-z0-9_-]/', '', $siteName);
-	$_tmpFile     = tempnam(sys_get_temp_dir(), 'fbo_backup_');
+	$_backupDir = backend_dir_path();
+	$_mediaDir = media_dir_path();
+	$_blogLabel = preg_replace('/[^A-Za-z0-9_-]/', '', $siteName);
+	$_tmpFile = tempnam(sys_get_temp_dir(), 'fbo_backup_');
 	if ($_tmpFile === false) {
 		http_response_code(500);
 		header('Content-Type: text/plain; charset=utf-8');
@@ -1028,21 +1179,19 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['download_bac
 		exit;
 	}
 
-	// Backend files
 	foreach ([
-		'posts.json'    => $_backupDir . '/posts.json',
+		'posts.json' => $_backupDir . '/posts.json',
 		'settings.json' => $_backupDir . '/settings.json',
-		'.auth.json'    => $_backupDir . '/.auth.json',
+		'.auth.json' => $_backupDir . '/.auth.json',
 	] as $_zipName => $_filePath) {
 		if (is_file($_filePath)) {
 			$_zip->addFile($_filePath, $_zipName);
 		}
 	}
 
-	// Media folder
 	if (is_dir($_mediaDir)) {
-		$_realMedia = realpath($_mediaDir);
-		if ($_realMedia !== false) {
+		$_realMedia = safe_realpath_within($_mediaDir, blog_root());
+		if ($_realMedia !== null && is_dir($_realMedia)) {
 			$_iter = new RecursiveIteratorIterator(
 				new RecursiveDirectoryIterator($_realMedia, FilesystemIterator::SKIP_DOTS)
 			);
@@ -1054,7 +1203,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['download_bac
 				if ($_realFile === false) {
 					continue;
 				}
-				// Path traversal guard
 				if (strncmp($_realFile, $_realMedia . DIRECTORY_SEPARATOR, strlen($_realMedia) + 1) !== 0) {
 					continue;
 				}
@@ -1077,8 +1225,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['download_bac
 	exit;
 }
 
-$posts          = load_posts();
-$allPostsCount  = count($posts);
+$posts = load_posts();
+$allPostsCount = count($posts);
 $singlePostMode = false;
 if ($requestedPostId !== '' && !$composeMode) {
 	foreach ($posts as $post) {
@@ -1087,18 +1235,18 @@ if ($requestedPostId !== '' && !$composeMode) {
 		}
 
 		$singlePostMode = true;
-		$view           = 'single';
-		$posts          = [$post];
-		$page           = 1;
+		$view = 'single';
+		$posts = [$post];
+		$page = 1;
 		break;
 	}
 }
 
 $shuffleThreshold = 100;
 $shuffleRemaining = max(0, $shuffleThreshold - $allPostsCount);
-$shuffleEligible  = !$composeMode && !$singlePostMode && $allPostsCount >= $shuffleThreshold;
-$shuffleSeed      = $shuffleSeedParam > 0 ? $shuffleSeedParam : random_int(100000, 999999999);
-$shuffleActive    = $shuffleEligible && $shuffleRequested;
+$shuffleEligible = !$composeMode && !$singlePostMode && $allPostsCount >= $shuffleThreshold;
+$shuffleSeed = $shuffleSeedParam > 0 ? $shuffleSeedParam : random_int(100000, 999999999);
+$shuffleActive = $shuffleEligible && $shuffleRequested;
 
 if ($shuffleActive) {
 	$pinnedPosts = [];
@@ -1144,23 +1292,16 @@ if (!$shuffleActive && $shuffleEligible) {
 	$shuffleToggleQuery .= '&shuffle=1&shuffle_seed=' . rawurlencode((string) $shuffleSeed);
 }
 
-$perPage      = $view === 'grid' ? 180 : 60;
-$totalItems   = count($posts);
-$totalPages   = max(1, (int) ceil($totalItems / max(1, $perPage)));
-$page         = min($page, $totalPages);
-$postsOnPage  = array_slice($posts, ($page - 1) * $perPage, $perPage);
+$perPage = $view === 'grid' ? 180 : 60;
+$totalItems = count($posts);
+$totalPages = max(1, (int) ceil($totalItems / max(1, $perPage)));
+$page = min($page, $totalPages);
+$postsOnPage = array_slice($posts, ($page - 1) * $perPage, $perPage);
 ?>
-<!--
- __  __       ____  
-|  \/  |     / ___| 
-| \  / |    | | __  
-| |\/| |    | |(  | 
-| |  | |  _ | |_) |  _ 
-(_)  (_) (_) \____| (_)
-moritzgauss.com©
--->
+
 <!doctype html>
 <html lang="en">
+
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1169,10 +1310,12 @@ moritzgauss.com©
 	<link rel="stylesheet" href="<?= local_asset_url('assets/css/upload.css') ?>">
 	<link rel="stylesheet" href="<?= local_asset_url('assets/css/audio-player.css') ?>">
 	<?php if ($editMode || $composeMode): ?>
-	<link rel="stylesheet" href="<?= local_asset_url('assets/css/admin.css') ?>">
+		<link rel="stylesheet" href="<?= local_asset_url('assets/css/admin.css') ?>">
 	<?php endif; ?>
 </head>
-<body class="<?= $showIntroAnimation ? 'intro-loading' : '' ?>" data-max-text-post-length="<?= MAX_TEXT_POST_LENGTH ?>" data-compose-mode="<?= $composeMode ? '1' : '0' ?>">
+
+<body class="<?= $showIntroAnimation ? 'intro-loading' : '' ?>" data-max-text-post-length="<?= MAX_TEXT_POST_LENGTH ?>"
+	data-compose-mode="<?= $composeMode ? '1' : '0' ?>">
 	<div class="intro-overlay" id="introOverlay" aria-hidden="true">
 		<div class="intro-fbo" id="introFboText">F</div>
 	</div>
@@ -1181,20 +1324,27 @@ moritzgauss.com©
 	<nav class="topbar<?= $composeMode ? ' topbar-compose' : '' ?>">
 		<div class="topbar-left">
 			<?php if (!$composeMode): ?>
-				   <?php if ($singlePostMode): ?>
-					   <a class="ui-btn" href="?<?= $blogQ ?>view=grid&page=<?= $fromPage ?><?= $stateQuery ?><?= $shuffleQuery ?>">back to grid</a>
-				   <?php endif; ?>
-				   <a href="?<?= $blogQ ?>view=grid<?= $stateQuery ?><?= $shuffleQuery ?>" class="ui-btn <?= $view === 'grid' ? 'active' : '' ?>" id="gridViewBtn">grid</a>
-				   <a href="?<?= $blogQ ?>view=single<?= $stateQuery ?><?= $shuffleQuery ?>" class="ui-btn <?= $view === 'single' ? 'active' : '' ?>" id="listViewBtn">list</a>
-				   <?php if ($shuffleEligible): ?>
-					   <a href="?<?= $blogQ ?>view=<?= rawurlencode($view) ?>&page=1<?= $shuffleToggleQuery ?>" class="ui-btn <?= $shuffleActive ? 'active' : '' ?>" id="shuffleModeBtn">shuffle</a>
-				   <?php endif; ?>
+				<?php if ($singlePostMode): ?>
+					<a class="ui-btn"
+						href="?<?= $blogQ ?>view=grid&page=<?= $fromPage ?><?= $stateQuery ?><?= $shuffleQuery ?>">back to
+						grid</a>
+				<?php endif; ?>
+				<a href="?<?= $blogQ ?>view=grid<?= $stateQuery ?><?= $shuffleQuery ?>"
+					class="ui-btn <?= $view === 'grid' ? 'active' : '' ?>" id="gridViewBtn">grid</a>
+				<a href="?<?= $blogQ ?>view=single<?= $stateQuery ?><?= $shuffleQuery ?>"
+					class="ui-btn <?= $view === 'single' ? 'active' : '' ?>" id="listViewBtn">list</a>
+				<?php if ($shuffleEligible): ?>
+					<a href="?<?= $blogQ ?>view=<?= rawurlencode($view) ?>&page=1<?= $shuffleToggleQuery ?>"
+						class="ui-btn <?= $shuffleActive ? 'active' : '' ?>" id="shuffleModeBtn">shuffle</a>
+				<?php endif; ?>
 			<?php endif; ?>
 			<button type="button" class="ui-btn" id="themeToggle">dark mode</button>
 		</div>
 		<?php if (!$composeMode && !$singlePostMode): ?>
 			<div class="topbar-right">
-				<span class="meta" id="pageInfoLabel" aria-haspopup="listbox" aria-expanded="false"><?= count($postsOnPage) ?> / <?= $totalItems ?> posts (page <?= $page ?>/<?= $totalPages ?>)</span>
+				<span class="meta" id="pageInfoLabel" aria-haspopup="listbox"
+					aria-expanded="false"><?= count($postsOnPage) ?> / <?= $totalItems ?> posts (page
+					<?= $page ?>/<?= $totalPages ?>)</span>
 				<select id="pageJumpSelect" class="page-jump" aria-label="Jump to page">
 					<?php for ($p = 1; $p <= $totalPages; $p++): ?>
 						<option value="<?= $p ?>" <?= $p === $page ? 'selected' : '' ?>>page <?= $p ?></option>
@@ -1217,13 +1367,19 @@ moritzgauss.com©
 				<?php $isPinned = !empty($post['pinned']); ?>
 				<?php $postType = (string) ($post['type'] ?? 'text'); ?>
 				<?php $postMediaPath = in_array($postType, ['image', 'video', 'audio'], true) ? asset_url((string) ($post['path'] ?? '')) : ''; ?>
-				<article class="item<?= $isPinned ? ' is-pinned' : '' ?>" data-post-id="<?= htmlspecialchars((string) $post['id'], ENT_QUOTES, 'UTF-8') ?>" data-post-type="<?= htmlspecialchars($postType, ENT_QUOTES, 'UTF-8') ?>" data-media-path="<?= htmlspecialchars($postMediaPath, ENT_QUOTES, 'UTF-8') ?>">
+				<article class="item<?= $isPinned ? ' is-pinned' : '' ?>"
+					data-post-id="<?= htmlspecialchars((string) $post['id'], ENT_QUOTES, 'UTF-8') ?>"
+					data-post-type="<?= htmlspecialchars($postType, ENT_QUOTES, 'UTF-8') ?>"
+					data-media-path="<?= htmlspecialchars($postMediaPath, ENT_QUOTES, 'UTF-8') ?>">
 					<?php if ($adminAuthed && $composeMode): ?>
 						<form method="post" class="pin-form">
-							<input type="hidden" name="post_id" value="<?= htmlspecialchars((string) $post['id'], ENT_QUOTES, 'UTF-8') ?>">
-							<button type="submit" name="<?= $isPinned ? 'unpin_post' : 'pin_post' ?>" value="1" class="ui-btn delete-btn pin-btn"><?= $isPinned ? 'Unpin' : 'Pin' ?></button>
+							<input type="hidden" name="post_id"
+								value="<?= htmlspecialchars((string) $post['id'], ENT_QUOTES, 'UTF-8') ?>">
+							<button type="submit" name="<?= $isPinned ? 'unpin_post' : 'pin_post' ?>" value="1"
+								class="ui-btn delete-btn pin-btn"><?= $isPinned ? 'Unpin' : 'Pin' ?></button>
 						</form>
-						<button type="button" class="ui-btn delete-btn mark-delete-btn" data-post-id="<?= htmlspecialchars((string) $post['id'], ENT_QUOTES, 'UTF-8') ?>">Delete</button>
+						<button type="button" class="ui-btn delete-btn mark-delete-btn"
+							data-post-id="<?= htmlspecialchars((string) $post['id'], ENT_QUOTES, 'UTF-8') ?>">Delete</button>
 					<?php endif; ?>
 					<?php if ((string) ($post['type'] ?? 'text') === 'text'): ?>
 						<div class="text-post-body"><?= linkify_text_post_content((string) ($post['text'] ?? '')) ?></div>
@@ -1233,12 +1389,22 @@ moritzgauss.com©
 							<?php if ((string) ($post['type'] ?? '') === 'video'): ?>
 								<?php if ($view === 'grid'): ?>
 									<div class="grid-video-placeholder" aria-hidden="true">
-										<svg class="grid-play-icon" width="36px" height="36px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.90588 4.53682C6.50592 4.2998 6 4.58808 6 5.05299V18.947C6 19.4119 6.50592 19.7002 6.90588 19.4632L18.629 12.5162C19.0211 12.2838 19.0211 11.7162 18.629 11.4838L6.90588 4.53682Z" stroke="#ffffff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+										<svg class="grid-play-icon" width="36px" height="36px" viewBox="0 0 24 24" fill="none"
+											xmlns="http://www.w3.org/2000/svg">
+											<path
+												d="M6.90588 4.53682C6.50592 4.2998 6 4.58808 6 5.05299V18.947C6 19.4119 6.50592 19.7002 6.90588 19.4632L18.629 12.5162C19.0211 12.2838 19.0211 11.7162 18.629 11.4838L6.90588 4.53682Z"
+												stroke="#ffffff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"></path>
+										</svg>
 									</div>
 								<?php else: ?>
 									<video src="<?= $mediaUrl ?>" preload="metadata" playsinline></video>
 									<div class="list-video-overlay" aria-label="Play video">
-										<svg class="list-play-icon" width="36px" height="36px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.90588 4.53682C6.50592 4.2998 6 4.58808 6 5.05299V18.947C6 19.4119 6.50592 19.7002 6.90588 19.4632L18.629 12.5162C19.0211 12.2838 19.0211 11.7162 18.629 11.4838L6.90588 4.53682Z" stroke="#ffffff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+										<svg class="list-play-icon" width="36px" height="36px" viewBox="0 0 24 24" fill="none"
+											xmlns="http://www.w3.org/2000/svg">
+											<path
+												d="M6.90588 4.53682C6.50592 4.2998 6 4.58808 6 5.05299V18.947C6 19.4119 6.50592 19.7002 6.90588 19.4632L18.629 12.5162C19.0211 12.2838 19.0211 11.7162 18.629 11.4838L6.90588 4.53682Z"
+												stroke="#ffffff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"></path>
+										</svg>
 									</div>
 								<?php endif; ?>
 							<?php elseif ((string) ($post['type'] ?? '') === 'audio'): ?>
@@ -1251,7 +1417,9 @@ moritzgauss.com©
 					<?php if ($isPinned): ?>
 						<div class="pinned-badge<?= ($composeMode && $adminAuthed) ? ' with-delete' : '' ?>">Pinned</div>
 					<?php endif; ?>
-					<div class="stamp" data-ts="<?= (int) ($post['timestamp'] ?? 0) ?>"><?= date('d.m.Y H:i', (int) ($post['timestamp'] ?? 0)) ?></div>
+					<div class="stamp" data-ts="<?= (int) ($post['timestamp'] ?? 0) ?>">
+						<?= date('d.m.Y H:i', (int) ($post['timestamp'] ?? 0)) ?>
+					</div>
 				</article>
 			<?php endforeach; ?>
 		</main>
@@ -1262,17 +1430,20 @@ moritzgauss.com©
 			<?php if ($shuffleEligible): ?>
 				<span class="meta">Shuffle mode is available<?= $shuffleActive ? ' (active).' : '.' ?></span>
 			<?php else: ?>
-				<span class="meta">Shuffle mode unlocks in <?= $shuffleRemaining ?> more post<?= $shuffleRemaining === 1 ? '' : 's' ?>.</span>
+				<span class="meta">Shuffle mode unlocks in <?= $shuffleRemaining ?> more
+					post<?= $shuffleRemaining === 1 ? '' : 's' ?>.</span>
 			<?php endif; ?>
 		</div>
 	<?php endif; ?>
 
 	<nav class="topbar topbar-pagination">
 		<?php if ($page > 1): ?>
-			<a class="ui-btn" href="?<?= $blogQ ?>view=<?= $view ?>&page=<?= $page - 1 ?><?= $stateQuery ?><?= $shuffleQuery ?>">newer</a>
+			<a class="ui-btn"
+				href="?<?= $blogQ ?>view=<?= $view ?>&page=<?= $page - 1 ?><?= $stateQuery ?><?= $shuffleQuery ?>">newer</a>
 		<?php endif; ?>
 		<?php if ($page < $totalPages): ?>
-			<a class="ui-btn" href="?<?= $blogQ ?>view=<?= $view ?>&page=<?= $page + 1 ?><?= $stateQuery ?><?= $shuffleQuery ?>">older</a>
+			<a class="ui-btn"
+				href="?<?= $blogQ ?>view=<?= $view ?>&page=<?= $page + 1 ?><?= $stateQuery ?><?= $shuffleQuery ?>">older</a>
 		<?php endif; ?>
 	</nav>
 
@@ -1281,12 +1452,5 @@ moritzgauss.com©
 	<script src="<?= local_asset_url('assets/js/instant-capture.js') ?>" defer></script>
 	<script src="<?= local_asset_url('assets/js/audio-player.js') ?>" defer></script>
 </body>
-<script>
-if (!window.location.search.match(/[?&]view=/)) {
-	if (window.matchMedia('(max-width: 700px)').matches) {
-		var listBtn = document.getElementById('listViewBtn');
-		if (listBtn) listBtn.click();
-	}
-}
-</script>
+
 </html>

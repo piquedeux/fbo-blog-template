@@ -1,0 +1,187 @@
+<?php
+declare(strict_types=1);
+
+function local_asset_url(string $relativePath): string
+{
+	$cleanPath = ltrim($relativePath, '/');
+	$fullPath = dirname(__DIR__) . '/' . $cleanPath;
+	$version = is_file($fullPath) ? (string) filemtime($fullPath) : '1';
+	return htmlspecialchars('../' . $cleanPath . '?v=' . rawurlencode($version), ENT_QUOTES, 'UTF-8');
+}
+
+$blogs = [];
+$dbFile = dirname(dirname(__DIR__)) . '/multi-tenant/core/db.php';
+if (is_file($dbFile)) {
+	try {
+		require_once $dbFile;
+		$blogs = mt_list_blogs();
+	} catch (Throwable $e) {
+	}
+}
+
+$blogs[] = ['blog_word' => 'moritzgauss', 'created_at' => '2026-01-01 00:00:00'];
+
+function fbo_format_date(string $date): string
+{
+	if ($date === '') {
+		return '';
+	}
+	$dt = DateTime::createFromFormat('Y-m-d H:i:s', $date);
+	return $dt ? $dt->format('d.m.Y H:i') : $date;
+}
+
+$scheme = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off') ? 'https' : 'http';
+$host = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
+?>
+<!doctype html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>FBO Project — Fuck Being Online</title>
+	<link rel="stylesheet" href="<?= local_asset_url('assets/css/styles.css') ?>">
+	<link rel="stylesheet" href="<?= local_asset_url('assets/css/fbo.css') ?>">
+</head>
+
+<body class="intro-loading">
+	<div class="intro-overlay" id="introOverlay" aria-hidden="true">
+		<div class="intro-fbo" id="introFboText">F</div>
+	</div>
+
+	<header class="hero" id="fboHeader">
+		<div class="hero-head">
+			<a href="#" onclick="history.back(); return false;" class="logo logo-link">FBO Project</a>
+			<div class="hero-right">
+				<div class="hero-actions">
+					<a href="/" class="ui-btn">Create blog</a>
+					<a href="https://www.instagram.com/fbeing.online" target="_blank" rel="noopener noreferrer"
+						class="text-link">IG</a>
+					<a href="mailto:fboproject@proton.me" class="text-link">M</a>
+				</div>
+			</div>
+		</div>
+		<div class="subtitle-line">FBO Project stands for Fuck Being Online.</div>
+	</header>
+
+	<div class="fbo-page-wrap" id="fboPageWrap">
+
+		<aside class="fbo-index-col">
+			<p class="fbo-index-heading">Blogs <?php if ($blogs !== []): ?><span class="fbo-count"
+						id="fboCount">(<?= count($blogs) ?>)</span><?php endif; ?></p>
+
+			<input type="search" class="fbo-search" id="fboSearch" placeholder="Search by name or URL…"
+				autocomplete="off" spellcheck="false">
+
+			<?php if ($blogs === []): ?>
+				<p class="fbo-count">No blogs yet.</p>
+			<?php else: ?>
+				<div class="fbo-blog-list" id="fboBlogList">
+					<?php foreach ($blogs as $blog):
+						$word = (string) ($blog['blog_word'] ?? '');
+						$date = (string) ($blog['created_at'] ?? '');
+						$url = '/blog/' . rawurlencode($word);
+						$fullUrl = $scheme . '://' . $host . $url;
+						$safeWord = htmlspecialchars($word, ENT_QUOTES, 'UTF-8');
+						$safeUrl = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+						$safeFullUrl = htmlspecialchars($fullUrl, ENT_QUOTES, 'UTF-8');
+						$formattedDate = fbo_format_date($date);
+						$safeDate = htmlspecialchars($formattedDate, ENT_QUOTES, 'UTF-8');
+						?>
+						<div class="fbo-blog-item" data-word="<?= $safeWord ?>" data-url="<?= $safeUrl ?>"
+							data-fullurl="<?= $safeFullUrl ?>">
+							<a href="<?= $safeUrl ?>">/blog/<?= $safeWord ?></a>
+							<?php if ($formattedDate !== ''): ?>
+								<span class="fbo-blog-date"><?= $safeDate ?></span>
+							<?php endif; ?>
+						</div>
+					<?php endforeach; ?>
+				</div>
+
+				<p class="fbo-no-results" id="fboNoResults">No blogs match your search.</p>
+
+				<div class="fbo-load-more-wrap" id="fboLoadMoreWrap">
+					<button class="ui-btn" id="fboLoadMore">Load more</button>
+				</div>
+			<?php endif; ?>
+		</aside>
+
+		<div class="fbo-info-col">
+			<main class="archive single">
+				<article class="item">
+					<div class="text-post-body">FBO is a blogging tool built around one idea: your content belongs to
+						you. You get your own URL, you set a name, you write and publish. No feed to optimize for, no
+						follower count to grow, no platform making decisions about who sees your work. What you post
+						stays yours, hosted on GDPR compliant infrastructure in Frankfurt or on your own server if you
+						prefer. The web as a place to put things, not perform.</div>
+					<div class="stamp">Core ideas</div>
+				</article>
+				<article class="item">
+					<div class="text-post-body">FBO keeps things separated and readable. CSS is split between
+						public-facing styles and the admin interface. JavaScript is split the same way. Snippets are
+						reusable, backend data lives in JSON placeholders. Every part has a clear role so the codebase
+						stays predictable. If you want to change how something looks or works, you know exactly where to
+						go.</div>
+					<div class="stamp">Template architecture</div>
+				</article>
+
+				<article class="item">
+					<div class="text-post-body">No bloated databases or invasive tracking. Your data stays in lean JSON
+						files—private, portable, and entirely under your control.</div>
+					<div class="stamp">Data privacy</div>
+				</article>
+
+				<article class="item">
+					<div class="text-post-body fbo-legal">
+						<details class="fbo-legal-item">
+							<summary>Annoying stuff</summary>
+							<div class="fbo-legal-copy">
+								<p><strong>Imprint (§ 5 TMG)</strong></p>
+								<p>
+									MG<br>
+									Bieberstr 67<br>
+									63039 Offenbach<br>
+									Germany
+								</p>
+								<p><strong>Privacy Policy (GDPR)</strong></p>
+								<p><strong>1. Controller</strong><br>MG, Bieberstr 67, 63039 Offenbach, Germany.</p>
+								<p><strong>2. Hosting and server logs</strong><br>When you access this website,
+									technically required data (for example IP address, date/time, requested page,
+									browser details) may be processed in server log files to ensure secure operation
+									(Art. 6(1)(f) GDPR).</p>
+								<p><strong>3. Contact</strong><br>If you contact us, your transmitted data is processed
+									to handle your request (Art. 6(1)(b) or (f) GDPR).</p>
+								<p><strong>4. Storage period</strong><br>Personal data is stored only as long as
+									required for the stated purposes or legal retention duties.</p>
+								<p><strong>5. Your rights</strong><br>You have rights of access, rectification,
+									deletion, restriction, data portability, and objection where applicable, plus the
+									right to lodge a complaint with a supervisory authority.</p>
+								<p><strong>6. Cookies</strong><br>This website currently does not use non-essential
+									tracking or marketing cookies. If this changes, a consent banner will be shown
+									before such cookies are set.</p>
+								<p><strong>Cookie note</strong><br>No non-essential tracking cookies are active right
+									now, so no cookie banner is currently displayed.</p>
+							</div>
+						</details>
+					</div>
+					<div class="stamp">Legal</div>
+				</article>
+
+				<article class="item">
+					<div class="text-post-body">Source code is available on <a
+							href="https://github.com/piquedeux/fbo-blog-template" target="_blank"
+							rel="noopener noreferrer">GitHub</a>.</div>
+					<div class="stamp">For nerds</div>
+				</article>
+
+
+			</main>
+		</div>
+
+	</div>
+
+	<script src="<?= local_asset_url('assets/js/script.js') ?>" defer></script>
+	<script src="<?= local_asset_url('assets/js/fbo.js') ?>" defer></script>
+</body>
+
+</html>

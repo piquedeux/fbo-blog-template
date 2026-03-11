@@ -199,8 +199,7 @@ body.header-peek .hero-actions {
 }
 
 .inline-form {
-	display: inline;
-	margin: 0;
+	display: contents;
 }
 
 .meta {

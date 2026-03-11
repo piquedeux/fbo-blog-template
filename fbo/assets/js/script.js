@@ -288,3 +288,15 @@
 		});
 	});
 })();
+
+(() => {
+	if (window.location.search.match(/[?&]view=/)) {
+		return;
+	}
+	if (window.matchMedia('(max-width: 700px)').matches) {
+		const listBtn = document.getElementById('listViewBtn');
+		if (listBtn) {
+			listBtn.click();
+		}
+	}
+})();

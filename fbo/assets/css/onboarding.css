@@ -50,7 +50,48 @@
 	word-break: break-all;
 }
 
-/* ── OTP display box ─────────────────────────────────────────────────── */
+.ob-search {
+	width: 100%;
+	border: 2px solid var(--line);
+	background: var(--bg);
+	color: var(--fg);
+	padding: 6px 10px;
+	font-size: 13px;
+	font-family: inherit;
+	outline: none;
+	border-radius: 0;
+	-webkit-appearance: none;
+}
+
+.ob-search::placeholder {
+	color: var(--muted);
+}
+
+.ob-search:focus {
+	outline: 2px solid var(--fg);
+	outline-offset: -2px;
+}
+
+.ob-blog-item[hidden] {
+	display: none;
+}
+
+.ob-no-results {
+	display: none;
+	font-size: 13px;
+	color: var(--muted);
+	padding: 4px 0;
+}
+
+.ob-blog-count {
+	font-size: 12px;
+	color: var(--muted);
+}
+
+.ob-load-more-wrap {
+	display: none;
+	padding-top: 6px;
+}
 
 .otp-display {
 	display: grid;
@@ -81,8 +122,6 @@
 	font-size: 12px;
 	color: var(--muted);
 }
-
-/* ── Auth error ───────────────────────────────────────────────────────── */
 
 .auth-error {
 	color: #b91c1c;
