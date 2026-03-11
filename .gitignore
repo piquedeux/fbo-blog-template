@@ -12,6 +12,9 @@ multi-tenant/config.php
 # Safe to commit: config.example.php (template, no real values)
 !multi-tenant/config.example.php
 
+# smtp-config.php contains Gmail App Password — NEVER commit
+fbo/smtp-config.php
+
 # ── Runtime tenant data ───────────────────────────────────────
 # Provisioned blog directories are created at runtime, not code
 multi-tenant/blogs/*/
