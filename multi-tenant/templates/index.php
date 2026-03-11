@@ -98,6 +98,7 @@ $previewUrl = $scheme . '://' . $host . '/blog/' . rawurlencode($previewWord);
 				<input id="onboardingBlogWord" class="upload-auth-input" type="text" name="blog_word" maxlength="24"
 					pattern="[A-Za-z0-9_-]+" value="<?= htmlspecialchars($blogInput, ENT_QUOTES, 'UTF-8') ?>"
 					placeholder="Blog name or your name" required autocomplete="off">
+				<div class="upload-note">Choose carefully! The blog name cannot be changed later.</div>
 				<input class="upload-auth-input" type="password" name="admin_password" minlength="6" maxlength="120"
 					placeholder="Admin password (min 6 chars)" required>
 				<div class="hero-actions">

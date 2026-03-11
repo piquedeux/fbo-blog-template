@@ -41,7 +41,183 @@ $host = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>FBO Project — Fuck Being Online</title>
 	<link rel="stylesheet" href="<?= local_asset_url('assets/css/styles.css') ?>">
-	<link rel="stylesheet" href="<?= local_asset_url('assets/css/fbo.css') ?>">
+	<style>
+		:root {
+			--fbo-header-h: 80px;
+		}
+
+		.fbo-page-wrap {
+			display: grid;
+			grid-template-columns: 280px 1fr;
+			height: calc(100vh - var(--fbo-header-h));
+		}
+
+		/* ── left col: independently scrollable ── */
+		.fbo-index-col {
+			border-right: 2px solid var(--line);
+			padding: 14px 12px;
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+			overflow-y: auto;
+		}
+
+		/* ── right col: independently scrollable ── */
+		.fbo-info-col {
+			padding: 14px;
+			overflow-y: auto;
+		}
+
+		.fbo-info-col .archive.single {
+			max-width: 100%;
+			margin: 0;
+			padding: 0;
+			border: none;
+		}
+
+		/* ── mobile: stack, no fixed height ── */
+		@media (max-width: 700px) {
+			.fbo-page-wrap {
+				grid-template-columns: 1fr;
+				height: auto;
+			}
+
+			.fbo-index-col {
+				border-right: none;
+				border-bottom: 2px solid var(--line);
+				overflow-y: visible;
+			}
+
+			.fbo-info-col {
+				overflow-y: visible;
+			}
+		}
+
+		/* ── blog index internals ── */
+		.fbo-index-heading {
+			font-size: 11px;
+			font-weight: 700;
+			letter-spacing: 0.07em;
+			text-transform: uppercase;
+			color: var(--muted);
+			margin: 0;
+			flex-shrink: 0;
+		}
+
+		.fbo-search {
+			flex-shrink: 0;
+			width: 100%;
+			border: 2px solid var(--line);
+			background: var(--bg);
+			color: var(--fg);
+			padding: 6px 10px;
+			font-size: 13px;
+			font-family: inherit;
+			outline: none;
+			border-radius: 0;
+			-webkit-appearance: none;
+		}
+
+		.fbo-search::placeholder {
+			color: var(--muted);
+		}
+
+		.fbo-search:focus {
+			outline: 2px solid var(--fg);
+			outline-offset: -2px;
+		}
+
+		.fbo-blog-list {
+			display: flex;
+			flex-direction: column;
+			gap: 0;
+		}
+
+		.fbo-blog-item {
+			display: flex;
+			flex-direction: column;
+			gap: 2px;
+			padding: 7px 0;
+			border-bottom: 1px solid var(--line);
+		}
+
+		.fbo-blog-item:last-child {
+			border-bottom: none;
+		}
+
+		.fbo-blog-item[hidden] {
+			display: none;
+		}
+
+		.fbo-blog-item a {
+			color: var(--fg);
+			text-decoration: none;
+			font-size: 13px;
+			font-weight: 600;
+		}
+
+		.fbo-blog-item a:hover {
+			text-decoration: underline;
+		}
+
+		.fbo-blog-date {
+			font-size: 11px;
+			color: var(--muted);
+		}
+
+		.fbo-no-results {
+			font-size: 13px;
+			color: var(--muted);
+			display: none;
+		}
+
+		.fbo-load-more-wrap {
+			display: none;
+			padding-top: 4px;
+			flex-shrink: 0;
+		}
+
+		.fbo-count {
+			font-size: 11px;
+			color: var(--muted);
+		}
+
+		.fbo-legal {
+			display: grid;
+			gap: 10px;
+			margin-top: 10px;
+		}
+
+		details.fbo-legal-item {
+			border: 2px solid var(--line);
+			padding: 8px 10px;
+		}
+
+		details.fbo-legal-item summary {
+			cursor: pointer;
+			font-weight: 700;
+			text-decoration: underline;
+			list-style: none;
+		}
+
+		details.fbo-legal-item summary::-webkit-details-marker {
+			display: none;
+		}
+
+		details.fbo-legal-item summary::marker {
+			content: '';
+		}
+
+		details.fbo-legal-item[open] summary {
+			margin-bottom: 8px;
+		}
+
+		.fbo-legal-copy {
+			font-size: 13px;
+			line-height: 1.45;
+			color: var(--fg);
+		}
+	</style>
 </head>
 
 <body class="intro-loading">
@@ -67,11 +243,9 @@ $host = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
 	<div class="fbo-page-wrap" id="fboPageWrap">
 
 		<aside class="fbo-index-col">
-			<p class="fbo-index-heading">Blogs <?php if ($blogs !== []): ?><span class="fbo-count"
-						id="fboCount">(<?= count($blogs) ?>)</span><?php endif; ?></p>
+			<p class="fbo-index-heading">Blogs <?php if ($blogs !== []): ?><span class="fbo-count" id="fboCount">(<?= count($blogs) ?>)</span><?php endif; ?></p>
 
-			<input type="search" class="fbo-search" id="fboSearch" placeholder="Search by name or URL…"
-				autocomplete="off" spellcheck="false">
+			<input type="search" class="fbo-search" id="fboSearch" placeholder="Search by name or URL…" autocomplete="off" spellcheck="false">
 
 			<?php if ($blogs === []): ?>
 				<p class="fbo-count">No blogs yet.</p>
@@ -88,8 +262,7 @@ $host = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
 						$formattedDate = fbo_format_date($date);
 						$safeDate = htmlspecialchars($formattedDate, ENT_QUOTES, 'UTF-8');
 						?>
-						<div class="fbo-blog-item" data-word="<?= $safeWord ?>" data-url="<?= $safeUrl ?>"
-							data-fullurl="<?= $safeFullUrl ?>">
+						<div class="fbo-blog-item" data-word="<?= $safeWord ?>" data-url="<?= $safeUrl ?>" data-fullurl="<?= $safeFullUrl ?>">
 							<a href="<?= $safeUrl ?>">/blog/<?= $safeWord ?></a>
 							<?php if ($formattedDate !== ''): ?>
 								<span class="fbo-blog-date"><?= $safeDate ?></span>
@@ -109,25 +282,16 @@ $host = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
 		<div class="fbo-info-col">
 			<main class="archive single">
 				<article class="item">
-					<div class="text-post-body">FBO is a blogging tool built around one idea: your content belongs to
-						you. You get your own URL, you set a name, you write and publish. No feed to optimize for, no
-						follower count to grow, no platform making decisions about who sees your work. What you post
-						stays yours, hosted on GDPR compliant infrastructure in Frankfurt or on your own server if you
-						prefer. The web as a place to put things, not perform.</div>
+					<div class="text-post-body">FBO is a blogging tool built around one idea: your content belongs to you. You get your own URL, you set a name, you write and publish. No feed to optimize for, no follower count to grow, no platform making decisions about who sees your work. What you post stays yours, hosted on GDPR compliant infrastructure in Frankfurt or on your own server if you prefer. The web as a place to put things, not perform.</div>
 					<div class="stamp">Core ideas</div>
 				</article>
 				<article class="item">
-					<div class="text-post-body">FBO keeps things separated and readable. CSS is split between
-						public-facing styles and the admin interface. JavaScript is split the same way. Snippets are
-						reusable, backend data lives in JSON placeholders. Every part has a clear role so the codebase
-						stays predictable. If you want to change how something looks or works, you know exactly where to
-						go.</div>
+					<div class="text-post-body">FBO keeps things separated and readable. CSS is split between public-facing styles and the admin interface. JavaScript is split the same way. Snippets are reusable, backend data lives in JSON placeholders. Every part has a clear role so the codebase stays predictable. If you want to change how something looks or works, you know exactly where to go.</div>
 					<div class="stamp">Template architecture</div>
 				</article>
 
 				<article class="item">
-					<div class="text-post-body">No bloated databases or invasive tracking. Your data stays in lean JSON
-						files—private, portable, and entirely under your control.</div>
+					<div class="text-post-body">No bloated databases or invasive tracking. Your data stays in lean JSON files—private, portable, and entirely under your control.</div>
 					<div class="stamp">Data privacy</div>
 				</article>
 
@@ -181,7 +345,84 @@ $host = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
 	</div>
 
 	<script src="<?= local_asset_url('assets/js/script.js') ?>" defer></script>
-	<script src="<?= local_asset_url('assets/js/fbo.js') ?>" defer></script>
+	<script>
+		(function () {
+			var MOBILE_BREAKPOINT = 700;
+			var PAGE_SIZE = 20;
+
+			function setHeaderVar() {
+				var h = document.getElementById('fboHeader');
+				var wrap = document.getElementById('fboPageWrap');
+				if (h && wrap) {
+					document.documentElement.style.setProperty('--fbo-header-h', h.offsetHeight + 'px');
+				}
+			}
+			setHeaderVar();
+			window.addEventListener('resize', setHeaderVar);
+
+			var search = document.getElementById('fboSearch');
+			var list = document.getElementById('fboBlogList');
+			var noResult = document.getElementById('fboNoResults');
+			var loadWrap = document.getElementById('fboLoadMoreWrap');
+			var loadBtn = document.getElementById('fboLoadMore');
+			var countEl = document.getElementById('fboCount');
+
+			if (!list) return;
+
+			var allItems = Array.from(list.querySelectorAll('.fbo-blog-item'));
+			var visibleEnd = PAGE_SIZE;
+			var currentQuery = '';
+
+			function isMobile() { return window.innerWidth <= MOBILE_BREAKPOINT; }
+
+			function applyState() {
+				var q = currentQuery.toLowerCase().trim();
+				var matched = [];
+
+				allItems.forEach(function (item) {
+					var fits =
+						q === '' ||
+						(item.dataset.word || '').toLowerCase().indexOf(q) !== -1 ||
+						(item.dataset.url || '').toLowerCase().indexOf(q) !== -1 ||
+						(item.dataset.fullurl || '').toLowerCase().indexOf(q) !== -1;
+					if (fits) matched.push(item);
+				});
+
+				allItems.forEach(function (item) {
+					var idx = matched.indexOf(item);
+					if (idx === -1) { item.hidden = true; return; }
+					item.hidden = (!isMobile() || q !== '') ? false : idx >= visibleEnd;
+				});
+
+				if (noResult) noResult.style.display = (q !== '' && matched.length === 0) ? '' : 'none';
+
+				if (loadWrap) loadWrap.style.display = (isMobile() && q === '' && matched.length > visibleEnd) ? '' : 'none';
+
+				if (countEl) {
+					var shown = matched.filter(function (i) { return !i.hidden; }).length;
+					countEl.textContent = q !== '' ? '(' + shown + ' of ' + allItems.length + ')' : '(' + allItems.length + ')';
+				}
+			}
+
+			if (search) {
+				search.addEventListener('input', function () {
+					currentQuery = search.value;
+					visibleEnd = PAGE_SIZE;
+					applyState();
+				});
+			}
+
+			if (loadBtn) {
+				loadBtn.addEventListener('click', function () {
+					visibleEnd += PAGE_SIZE;
+					applyState();
+				});
+			}
+
+			window.addEventListener('resize', applyState);
+			applyState();
+		})();
+	</script>
 </body>
 
 </html>

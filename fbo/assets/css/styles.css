@@ -55,7 +55,8 @@ body {
 	justify-content: space-between;
 	align-items: baseline;
 	gap: 16px;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
+	min-width: 0;
 }
 
 body.header-peek .hero {
@@ -100,6 +101,7 @@ body.header-peek .hero-actions {
 	align-items: flex-start;
 	margin-left: auto;
 	gap: 8px;
+	flex-shrink: 0;
 }
 
 .hero-actions {
@@ -113,6 +115,10 @@ body.header-peek .hero-actions {
 	font-weight: 700;
 	font-size: clamp(16px, 2.6vw, 18px);
 	letter-spacing: 0.01em;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .logo-link {
@@ -199,7 +205,8 @@ body.header-peek .hero-actions {
 }
 
 .inline-form {
-	display: contents;
+	display: inline;
+	margin: 0;
 }
 
 .meta {

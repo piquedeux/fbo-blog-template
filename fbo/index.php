@@ -184,9 +184,9 @@ function blog_path_preview_url(string $blogWord): string
 function load_settings(): array
 {
 	$default = [
-		'site_name'    => 'fbo',
+		'site_name' => 'fbo',
 		'hero_subtitle' => '',
-		'admin_email'  => '',
+		'recovery_email' => '',
 	];
 
 	$path = settings_path();
@@ -201,59 +201,82 @@ function load_settings(): array
 
 	$siteName = normalize_blog_word((string) ($decoded['site_name'] ?? $default['site_name']));
 	$subtitle = trim((string) ($decoded['hero_subtitle'] ?? $default['hero_subtitle']));
-	$email    = trim((string) ($decoded['admin_email'] ?? ''));
-	if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-		$email = '';
-	}
+	$rawEmail = trim((string) ($decoded['recovery_email'] ?? ''));
 
 	return [
-		'site_name'    => $siteName,
+		'site_name' => $siteName,
 		'hero_subtitle' => mb_substr($subtitle, 0, 180),
-		'admin_email'  => $email,
+		'recovery_email' => (filter_var($rawEmail, FILTER_VALIDATE_EMAIL) !== false) ? $rawEmail : '',
 	];
 }
 
 function save_settings(array $settings): void
 {
-	$email = trim((string) ($settings['admin_email'] ?? ''));
-	if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-		$email = '';
-	}
+	$rawEmail = trim((string) ($settings['recovery_email'] ?? ''));
 	$payload = [
-		'site_name'    => normalize_blog_word((string) ($settings['site_name'] ?? 'fbo')),
+		'site_name' => normalize_blog_word((string) ($settings['site_name'] ?? 'fbo')),
 		'hero_subtitle' => mb_substr(trim((string) ($settings['hero_subtitle'] ?? '')), 0, 180),
-		'admin_email'  => mb_substr($email, 0, 254),
+		'recovery_email' => (filter_var($rawEmail, FILTER_VALIDATE_EMAIL) !== false) ? $rawEmail : '',
 	];
 
 	file_put_contents(settings_path(), json_encode($payload, JSON_UNESCAPED_SLASHES));
 }
 
-function send_fbo_mail(string $to, string $subject, string $body): bool
+function load_smtp_config(): array
 {
-	$host = defined('FBO_SMTP_HOST') ? (string) FBO_SMTP_HOST : '';
-	$port = defined('FBO_SMTP_PORT') ? (int)    FBO_SMTP_PORT : 587;
-	$user = defined('FBO_SMTP_USER') ? (string) FBO_SMTP_USER : '';
-	$pass = defined('FBO_SMTP_PASS') ? (string) FBO_SMTP_PASS : '';
-	$from = defined('FBO_SMTP_FROM') ? (string) FBO_SMTP_FROM : $user;
-	if ($from === '') {
-		$from = $user;
+	// 1. Standalone: fbo/smtp-config.php
+	$standalone = __DIR__ . '/smtp-config.php';
+	if (is_file($standalone)) {
+		$cfg = @(include $standalone);
+		if (is_array($cfg) && isset($cfg['smtp_host']) && $cfg['smtp_host'] !== '') {
+			return $cfg;
+		}
 	}
-
-	if ($host === '' || $user === '') {
-		$fallbackHost = preg_replace('/[^a-zA-Z0-9.\-]/', '', (string) ($_SERVER['HTTP_HOST'] ?? 'localhost'));
-		return (bool) @mail($to, $subject, $body, 'From: noreply@' . $fallbackHost);
+	// 2. Multi-tenant: project-root/multi-tenant/config.php
+	$mt = dirname(__DIR__) . '/multi-tenant/config.php';
+	if (is_file($mt)) {
+		$cfg = @(include $mt);
+		if (is_array($cfg) && isset($cfg['smtp_host']) && $cfg['smtp_host'] !== '') {
+			return $cfg;
+		}
 	}
+	return [];
+}
 
-	$useSSL = ($port === 465);
-	$conn   = @fsockopen(($useSSL ? 'ssl://' : '') . $host, $port, $errno, $errstr, 15);
-	if (!$conn) {
+function smtp_send(array $cfg, string $to, string $subject, string $body): bool
+{
+	$host = (string) ($cfg['smtp_host'] ?? '');
+	$port = (int) ($cfg['smtp_port'] ?? 465);
+	$user = (string) ($cfg['smtp_user'] ?? '');
+	$pass = (string) ($cfg['smtp_pass'] ?? '');
+	$from = (string) ($cfg['smtp_from'] ?? $user);
+
+	if ($host === '' || $user === '' || $pass === '' || $to === '') {
 		return false;
 	}
 
-	$read = static function () use ($conn): string {
+	$useSSL = ($port === 465);
+	$useTLS = ($port === 587);
+	$address = ($useSSL ? 'ssl://' : '') . $host . ':' . $port;
+
+	$context = stream_context_create([
+		'ssl' => [
+			'verify_peer' => true,
+			'verify_peer_name' => true,
+			'allow_self_signed' => false,
+		],
+	]);
+
+	$socket = @stream_socket_client($address, $errno, $errstr, 30, STREAM_CLIENT_CONNECT, $context);
+	if ($socket === false) {
+		return false;
+	}
+	stream_set_timeout($socket, 30);
+
+	$readResponse = static function () use ($socket): string {
 		$buf = '';
-		while (!feof($conn)) {
-			$line = fgets($conn, 512);
+		while (!feof($socket)) {
+			$line = fgets($socket, 512);
 			if ($line === false) {
 				break;
 			}
@@ -265,54 +288,109 @@ function send_fbo_mail(string $to, string $subject, string $body): bool
 		return $buf;
 	};
 
-	$write = static function (string $cmd) use ($conn): void {
-		fwrite($conn, $cmd . "\r\n");
+	$send = static function (string $data) use ($socket): void {
+		@fwrite($socket, $data . "\r\n");
 	};
 
-	$read();
-	$write('EHLO ' . (gethostname() ?: 'localhost'));
-	$ehlo = $read();
-
-	if (!$useSSL && str_contains($ehlo, 'STARTTLS')) {
-		$write('STARTTLS');
-		$read();
-		stream_socket_enable_crypto($conn, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
-		$write('EHLO ' . (gethostname() ?: 'localhost'));
-		$read();
-	}
-
-	$write('AUTH LOGIN');
-	$read();
-	$write(base64_encode($user));
-	$read();
-	$write(base64_encode($pass));
-	$authResp = $read();
-
-	if (!str_starts_with(ltrim($authResp), '235')) {
-		fclose($conn);
+	$r = $readResponse();
+	if (!str_starts_with(trim($r), '220')) {
+		fclose($socket);
 		return false;
 	}
 
-	$write('MAIL FROM:<' . $from . '>');
-	$read();
-	$write('RCPT TO:<' . $to . '>');
-	$read();
-	$write('DATA');
-	$read();
+	$send('EHLO localhost');
+	$r = $readResponse();
+	if (!str_starts_with(trim($r), '250')) {
+		fclose($socket);
+		return false;
+	}
 
-	$msg  = 'From: ' . $from . "\r\n";
-	$msg .= 'To: ' . $to . "\r\n";
-	$msg .= 'Subject: ' . $subject . "\r\n";
-	$msg .= 'MIME-Version: 1.0' . "\r\n";
-	$msg .= 'Content-Type: text/plain; charset=UTF-8' . "\r\n\r\n";
-	$msg .= $body . "\r\n.";
-	$write($msg);
-	$dataResp = $read();
+	if ($useTLS) {
+		$send('STARTTLS');
+		$r = $readResponse();
+		if (!str_starts_with(trim($r), '220')) {
+			fclose($socket);
+			return false;
+		}
+		if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+			fclose($socket);
+			return false;
+		}
+		$send('EHLO localhost');
+		$r = $readResponse();
+		if (!str_starts_with(trim($r), '250')) {
+			fclose($socket);
+			return false;
+		}
+	}
 
-	$write('QUIT');
-	fclose($conn);
+	$send('AUTH LOGIN');
+	$r = $readResponse();
+	if (!str_starts_with(trim($r), '334')) {
+		fclose($socket);
+		return false;
+	}
 
-	return str_starts_with(ltrim($dataResp), '250');
+	$send(base64_encode($user));
+	$r = $readResponse();
+	if (!str_starts_with(trim($r), '334')) {
+		fclose($socket);
+		return false;
+	}
+
+	$send(base64_encode($pass));
+	$r = $readResponse();
+	if (!str_starts_with(trim($r), '235')) {
+		fclose($socket);
+		return false;
+	}
+
+	$send('MAIL FROM:<' . $from . '>');
+	$r = $readResponse();
+	if (!str_starts_with(trim($r), '250')) {
+		fclose($socket);
+		return false;
+	}
+
+	$send('RCPT TO:<' . $to . '>');
+	$r = $readResponse();
+	if (!str_starts_with(trim($r), '25')) {
+		fclose($socket);
+		return false;
+	}
+
+	$send('DATA');
+	$r = $readResponse();
+	if (!str_starts_with(trim($r), '354')) {
+		fclose($socket);
+		return false;
+	}
+
+	$safeBody = str_replace("\r\n", "\n", $body);
+	$safeBody = str_replace("\r", "\n", $safeBody);
+	$lines = explode("\n", $safeBody);
+	$dotStuffed = implode("\r\n", array_map(
+		static fn(string $l): string => ($l !== '' && $l[0] === '.') ? '.' . $l : $l,
+		$lines
+	));
+
+	$headers = 'From: ' . $from . "\r\n"
+		. 'To: ' . $to . "\r\n"
+		. 'Subject: ' . $subject . "\r\n"
+		. "MIME-Version: 1.0\r\n"
+		. "Content-Type: text/plain; charset=UTF-8\r\n"
+		. "\r\n";
+
+	@fwrite($socket, $headers . $dotStuffed . "\r\n.\r\n");
+	$r = $readResponse();
+	if (!str_starts_with(trim($r), '250')) {
+		fclose($socket);
+		return false;
+	}
+
+	$send('QUIT');
+	fclose($socket);
+	return true;
 }
 
 function onboarding_required(): bool
@@ -673,6 +751,13 @@ function pop_flash_message(): string
 	return $message;
 }
 
+function pop_otp_display(): string
+{
+	$otp = (string) ($_SESSION[OTP_DISPLAY_SESSION_KEY] ?? '');
+	unset($_SESSION[OTP_DISPLAY_SESSION_KEY]);
+	return $otp;
+}
+
 $blogQ = '';
 $_blogSafe = '';
 $_blogRaw = trim((string) ($_GET['blog'] ?? ''));
@@ -687,31 +772,52 @@ if ($_blogRaw !== '') {
 $_sk = $_blogSafe !== '' ? '_' . $_blogSafe : '';
 define('ADMIN_SESSION_KEY', 'fbo_admin_auth' . $_sk);
 define('FLASH_MESSAGE_SESSION_KEY', 'fbo_flash' . $_sk);
+define('OTP_DISPLAY_SESSION_KEY', 'fbo_otp_once' . $_sk);
 define('OTP_RESET_SESSION_KEY', 'fbo_otp_reset' . $_sk);
 unset($_blogRaw, $_tmp, $_sk);
 
 $isOtpReset = !empty($_SESSION[OTP_RESET_SESSION_KEY]);
 $onboardingError = '';
 $flashMessage = pop_flash_message();
+$otpDisplay = pop_otp_display();
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['generate_otp'])) {
-	$resetEmail = trim((string) (load_settings()['admin_email'] ?? ''));
-	if ($resetEmail === '' || !filter_var($resetEmail, FILTER_VALIDATE_EMAIL)) {
-		set_flash_message('No admin email configured. Add one in Edit → Settings to enable password reset.');
+	$_genSettings = load_settings();
+	$_recoveryEmail = (string) ($_genSettings['recovery_email'] ?? '');
+	if ($_recoveryEmail === '') {
+		set_flash_message('Keine Wiederherstellungs-E-Mail konfiguriert. Bitte zuerst einloggen und eine E-Mail hinterlegen.');
 		header('Location: ?' . $blogQ . 'edit=1');
 		exit;
 	}
-	$otp  = strtoupper(bin2hex(random_bytes(4)));
+	$otp = strtoupper(bin2hex(random_bytes(4)));
 	$hash = password_hash($otp, PASSWORD_BCRYPT);
-	file_put_contents(
+	$written = file_put_contents(
 		otp_path(),
 		json_encode(['hash' => $hash, 'expires' => time() + 900], JSON_UNESCAPED_SLASHES)
 	);
-	$mailSubject = 'FBO — one-time password';
-	$mailBody    = 'One-time password (valid 15 min): ' . $otp . "\r\n\r\nDo not share this code.";
-	send_fbo_mail($resetEmail, $mailSubject, $mailBody);
-	set_flash_message('Reset code sent to your admin email.');
-	header('Location: ?' . $blogQ . 'edit=1&otp=1');
+	if ($written === false) {
+		set_flash_message('Einmalpasswort konnte nicht erstellt werden. Bitte Schreibrechte prüfen.');
+		header('Location: ?' . $blogQ . 'edit=1');
+		exit;
+	}
+	$_smtpCfg = load_smtp_config();
+	if (empty($_smtpCfg)) {
+		@unlink(otp_path());
+		set_flash_message('SMTP nicht konfiguriert. Bitte smtp-config.php ausfüllen.');
+		header('Location: ?' . $blogQ . 'edit=1');
+		exit;
+	}
+	$_subject = 'Dein Einmalpasswort';
+	$_emailBody = "Dein Einmalpasswort lautet:\n\n  " . $otp . "\n\nEs ist 15 Minuten gültig. Teile es niemandem mit.";
+	$_sent = smtp_send($_smtpCfg, $_recoveryEmail, $_subject, $_emailBody);
+	if (!$_sent) {
+		@unlink(otp_path());
+		set_flash_message('E-Mail konnte nicht gesendet werden. Bitte SMTP-Einstellungen prüfen.');
+		header('Location: ?' . $blogQ . 'edit=1');
+		exit;
+	}
+	set_flash_message('Einmalpasswort wurde an deine Wiederherstellungs-E-Mail gesendet.');
+	header('Location: ?' . $blogQ . 'edit=1');
 	exit;
 }
 
@@ -722,7 +828,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['otp_login'
 		@unlink(otp_path());
 		unset($_SESSION[ADMIN_SESSION_KEY]);
 		$_SESSION[OTP_RESET_SESSION_KEY] = true;
-		header('Location: ' . blog_self_url());
+		header('Location: ?' . $blogQ . 'edit=1');
 		exit;
 	}
 	$otpLoginError = 'Invalid or expired one-time password.';
@@ -731,63 +837,32 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['otp_login'
 if (onboarding_required()) {
 	if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['complete_onboarding'])) {
 		$password = (string) ($_POST['admin_password'] ?? '');
+		$passwordConfirm = (string) ($_POST['admin_password_confirm'] ?? '');
 		if (mb_strlen($password) < 6) {
 			$onboardingError = 'Password must be at least 6 characters.';
+		} elseif ($password !== $passwordConfirm) {
+			$onboardingError = 'Passwords do not match.';
 		} else {
 			save_password_hash($password);
 			unset($_SESSION[OTP_RESET_SESSION_KEY]);
 			$_SESSION[ADMIN_SESSION_KEY] = true;
-			header('Location: ' . blog_self_url());
+			set_flash_message('Password updated.');
+			header('Location: ?' . $blogQ . 'edit=1');
 			exit;
 		}
 	}
 
-	if (!$isOtpReset) {
+	if (!$isOtpReset || !is_file(auth_path())) {
 		header('Location: /');
 		exit;
 	}
-	?>
-	<!doctype html>
-	<html lang="en">
-
-	<head>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<title>Reset Password</title>
-		<link rel="stylesheet" href="<?= local_asset_url('assets/css/styles.css') ?>">
-		<link rel="stylesheet" href="<?= local_asset_url('assets/css/admin.css') ?>">
-		<link rel="stylesheet" href="<?= local_asset_url('assets/css/onboarding.css') ?>">
-	</head>
-
-	<body class="onboarding-page">
-		<main class="onboarding-wrap">
-			<section class="onboarding-card">
-				<p class="subtitle-line onboarding-lead">Set a new admin password. Posts and media stay untouched.</p>
-				<?php if ($onboardingError !== ''): ?>
-					<div class="subtitle-line onboarding-error"><?= htmlspecialchars($onboardingError, ENT_QUOTES, 'UTF-8') ?>
-					</div>
-				<?php endif; ?>
-				<form method="post" class="upload-panel onboarding-form">
-					<input class="upload-auth-input" type="password" name="admin_password" maxlength="120"
-						placeholder="New password (min 6 chars)" required>
-					<div class="hero-actions">
-						<button type="submit" name="complete_onboarding" value="1" class="ui-btn">Set new password</button>
-					</div>
-				</form>
-			</section>
-		</main>
-	</body>
-
-	</html>
-	<?php
-	exit;
 }
 
 $settings = load_settings();
 $siteName = (string) ($settings['site_name'] ?? 'fbo');
 $siteNameDisplay = strtoupper($siteName);
 $heroSubtitle = (string) ($settings['hero_subtitle'] ?? '');
-$adminEmail  = (string) ($settings['admin_email'] ?? '');
+$recoveryEmail = (string) ($settings['recovery_email'] ?? '');
 $passwordHash = load_password_hash();
 
 $view = isset($_GET['view']) && in_array($_GET['view'], ['grid', 'single'], true)
@@ -866,29 +941,28 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['delete_blo
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_settings']) && $adminAuthed) {
 	save_settings([
-		'site_name'    => (string) ($_POST['site_name'] ?? $siteName),
+		'site_name' => $siteName,
 		'hero_subtitle' => (string) ($_POST['hero_subtitle'] ?? $heroSubtitle),
-		'admin_email'  => (string) ($_POST['admin_email'] ?? $adminEmail),
+		'recovery_email' => $recoveryEmail,
 	]);
 	set_flash_message('Settings saved.');
 	header('Location: ?' . $blogQ . 'edit=1');
 	exit;
 }
 
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['change_password']) && $adminAuthed) {
-	$currentPw = (string) ($_POST['current_password'] ?? '');
-	$newPw     = (string) ($_POST['new_password'] ?? '');
-	$confirmPw = (string) ($_POST['confirm_password'] ?? '');
-	if ($passwordHash === '' || !password_verify($currentPw, $passwordHash)) {
-		set_flash_message('Current password is incorrect.');
-	} elseif (mb_strlen($newPw) < 6) {
-		set_flash_message('New password must be at least 6 characters.');
-	} elseif ($newPw !== $confirmPw) {
-		set_flash_message('Passwords do not match.');
-	} else {
-		save_password_hash($newPw);
-		set_flash_message('Password changed.');
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_recovery_email']) && $adminAuthed) {
+	$_newEmail = trim((string) ($_POST['recovery_email'] ?? ''));
+	if ($_newEmail !== '' && filter_var($_newEmail, FILTER_VALIDATE_EMAIL) === false) {
+		set_flash_message('Ungültige E-Mail-Adresse.');
+		header('Location: ?' . $blogQ . 'edit=1');
+		exit;
 	}
+	save_settings([
+		'site_name' => $siteName,
+		'hero_subtitle' => $heroSubtitle,
+		'recovery_email' => $_newEmail,
+	]);
+	set_flash_message($_newEmail === '' ? 'Wiederherstellungs-E-Mail entfernt.' : 'Wiederherstellungs-E-Mail gespeichert.');
 	header('Location: ?' . $blogQ . 'edit=1');
 	exit;
 }

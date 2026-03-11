@@ -9,13 +9,13 @@ if (isset($_SERVER['HTTP_HOST'])) {
  * config.php is in .gitignore and will never be committed.
  */
 return [
-    'db_host'     => 'localhost',
-    'db_port'     => 3306,
-    'db_name'     => 'your_database_name',
-    'db_user'     => 'your_database_user',
+    'db_host' => 'localhost',
+    'db_port' => 3306,
+    'db_name' => 'your_database_name',
+    'db_user' => 'your_database_user',
     'db_password' => 'your_database_password',
-    'db_charset'  => 'utf8mb4',
-    'app_debug'   => false,
+    'db_charset' => 'utf8mb4',
+    'app_debug' => false,
 
     // SMTP — used to deliver password-reset one-time codes.
     // Gmail: use an App Password (16-char code) as smtp_pass.

@@ -3,6 +3,7 @@
 	const count = document.getElementById('textPostCount');
 	const epoch = document.getElementById('textPostClientEpoch');
 	const form = document.getElementById('textPostForm');
+	const toggleBtn = document.getElementById('textPostToggleBtn');
 	if (!textarea || !count || !epoch || !form) return;
 
 	const limit = Number(document.body?.dataset?.maxTextPostLength || '280');
@@ -10,6 +11,16 @@
 		const len = textarea.value.length;
 		count.textContent = `${len} / ${limit}`;
 	};
+
+	if (toggleBtn) {
+		toggleBtn.addEventListener('click', () => {
+			const open = form.hidden;
+			form.hidden = !open;
+			toggleBtn.classList.toggle('active', open);
+			toggleBtn.textContent = open ? 'Cancel' : 'Post text';
+			if (open) { textarea.focus(); }
+		});
+	}
 
 	textarea.addEventListener('input', refreshCount);
 	form.addEventListener('submit', () => {
@@ -106,50 +117,7 @@
 	input.addEventListener('change', render);
 })();
 
-(() => {
-	const titleInput = document.getElementById('editBlogWord');
-	const titlePreview = document.getElementById('editTitlePreview');
-	const urlPreview = document.getElementById('editUrlPreview');
-	const siteTitleDisplay = document.getElementById('siteTitleDisplay');
-	if (!titleInput || !titlePreview) return;
 
-	const normalizeBlogWord = (value) => {
-		const cleaned = String(value || '').trim().replace(/[^A-Za-z0-9_-]/g, '');
-		return cleaned.slice(0, 24) || 'fbo';
-	};
-
-	const rootFromCurrentHost = () => {
-		const host = window.location.host.replace(/:\d+$/, '');
-		if (!host) return 'example.com';
-		if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || host === 'localhost') {
-			return host;
-		}
-		const parts = host.split('.').filter(Boolean);
-		if (parts.length >= 2) {
-			return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`;
-		}
-		return host;
-	};
-
-	const updatePreview = () => {
-		const safe = normalizeBlogWord(titleInput.value);
-		titlePreview.textContent = safe.toUpperCase();
-		if (siteTitleDisplay) {
-			siteTitleDisplay.textContent = safe.toUpperCase();
-		}
-		if (urlPreview) {
-			const protocol = window.location.protocol || 'https:';
-			urlPreview.textContent = `${protocol}//${safe.toLowerCase()}.${rootFromCurrentHost()}`;
-		}
-	};
-
-	['input', 'keyup', 'change', 'blur'].forEach((eventName) => {
-		titleInput.addEventListener(eventName, updatePreview);
-	});
-
-	window.addEventListener('pageshow', updatePreview);
-	updatePreview();
-})();
 
 (() => {
 	const markButtons = Array.from(document.querySelectorAll('.mark-delete-btn[data-post-id]'));

@@ -53,9 +53,9 @@ function mt_render_error_page(int $statusCode, string $message, array $details =
     exit;
 }
 
-$mtRoot     = dirname(__DIR__);             // multi-tenant/
-$webRoot    = dirname($mtRoot);             // htdocs/
-$blogsDir   = $mtRoot . '/blogs';
+$mtRoot = dirname(__DIR__);             // multi-tenant/
+$webRoot = dirname($mtRoot);             // htdocs/
+$blogsDir = $mtRoot . '/blogs';
 $fboCandidates = [
     $webRoot . '/fbo/index.php',
     $mtRoot . '/fbo/index.php',
@@ -81,31 +81,31 @@ if ($blogWord === '') {
 
 // security: validate against DB so no arbitrary filesystem paths are possible
 if (!mt_blog_exists_in_db($blogWord)) {
-	mt_render_error_page(404, 'Blog not found in database.', [
-		'blog' => $blogWord,
-	]);
+    mt_render_error_page(404, 'Blog not found in database.', [
+        'blog' => $blogWord,
+    ]);
 }
 
 $targetBlogDir = $blogsDir . '/' . $blogWord;
 
 // double-check filesystem traversal
 $realBlogsRoot = realpath($blogsDir);
-$realTarget    = realpath($targetBlogDir);
+$realTarget = realpath($targetBlogDir);
 
 if (
     $realBlogsRoot === false
-    || $realTarget  === false
+    || $realTarget === false
     || !str_starts_with($realTarget, $realBlogsRoot . DIRECTORY_SEPARATOR)
     || $fboIndex === ''
 ) {
-	mt_render_error_page(500, 'Filesystem bootstrap check failed.', [
-		'blogs_dir' => $blogsDir,
-		'real_blogs_root' => $realBlogsRoot,
-		'target_blog_dir' => $targetBlogDir,
-		'real_target' => $realTarget,
-		'fbo_candidates' => $fboCandidates,
-		'fbo_index' => $fboIndex,
-	]);
+    mt_render_error_page(500, 'Filesystem bootstrap check failed.', [
+        'blogs_dir' => $blogsDir,
+        'real_blogs_root' => $realBlogsRoot,
+        'target_blog_dir' => $targetBlogDir,
+        'real_target' => $realTarget,
+        'fbo_candidates' => $fboCandidates,
+        'fbo_index' => $fboIndex,
+    ]);
 }
 
 // ── Define context constants for fbo/index.php ────────────────────────────
@@ -128,11 +128,16 @@ $_mtCfgPath = dirname(__DIR__) . '/config.php';
 if (is_file($_mtCfgPath)) {
     $_mtCfg = require $_mtCfgPath;
     if (is_array($_mtCfg)) {
-        if (!defined('FBO_SMTP_HOST')) define('FBO_SMTP_HOST', (string) ($_mtCfg['smtp_host'] ?? ''));
-        if (!defined('FBO_SMTP_PORT')) define('FBO_SMTP_PORT', (int)    ($_mtCfg['smtp_port'] ?? 587));
-        if (!defined('FBO_SMTP_USER')) define('FBO_SMTP_USER', (string) ($_mtCfg['smtp_user'] ?? ''));
-        if (!defined('FBO_SMTP_PASS')) define('FBO_SMTP_PASS', (string) ($_mtCfg['smtp_pass'] ?? ''));
-        if (!defined('FBO_SMTP_FROM')) define('FBO_SMTP_FROM', (string) ($_mtCfg['smtp_from'] ?? ''));
+        if (!defined('FBO_SMTP_HOST'))
+            define('FBO_SMTP_HOST', (string) ($_mtCfg['smtp_host'] ?? ''));
+        if (!defined('FBO_SMTP_PORT'))
+            define('FBO_SMTP_PORT', (int) ($_mtCfg['smtp_port'] ?? 587));
+        if (!defined('FBO_SMTP_USER'))
+            define('FBO_SMTP_USER', (string) ($_mtCfg['smtp_user'] ?? ''));
+        if (!defined('FBO_SMTP_PASS'))
+            define('FBO_SMTP_PASS', (string) ($_mtCfg['smtp_pass'] ?? ''));
+        if (!defined('FBO_SMTP_FROM'))
+            define('FBO_SMTP_FROM', (string) ($_mtCfg['smtp_from'] ?? ''));
     }
     unset($_mtCfg);
 }

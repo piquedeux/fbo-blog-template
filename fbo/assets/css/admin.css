@@ -152,4 +152,21 @@
 	.pinned-badge.with-delete {
 		right: 6px;
 	}
+
+	.hero .hero-actions {
+		width: 100%;
+	}
+
+	.hero .hero-actions .ui-btn {
+		white-space: normal;
+		word-break: break-word;
+	}
+
+	.subtitle-form {
+		flex-direction: column;
+	}
+
+	.upload-panel {
+		max-width: 100%;
+	}
 }
